@@ -69,8 +69,7 @@ func (mt MessageType) New(ctx context.Context) Message {
 	case YIELD:
 		return &Yield{ctx: ctx}
 	default:
-		// TODO: allow custom message types?
-		return nil
+		return CustomMessage{"ctx": ctx}
 	}
 }
 
