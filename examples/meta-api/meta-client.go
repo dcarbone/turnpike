@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"gopkg.in/jcelliott/turnpike.v2"
+	"github.com/dcarbone/turnpike"
 )
 
 func main() {

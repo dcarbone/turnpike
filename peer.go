@@ -22,7 +22,7 @@ type Peer interface {
 	// Multiple calls to Close() will have no effect.
 	Close() error
 
-	// Receive returns a channel of messages coming from the peer.
+	// Receive returns a channel of incomingMessages coming from the peer.
 	Receive() <-chan Message
 }
 

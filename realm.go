@@ -1,6 +1,8 @@
 package turnpike
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -14,66 +16,32 @@ const (
 // Clients that have connected to a WAMP router are joined to a realm and all
 // message delivery is handled by the realm.
 type Realm struct {
-	URI URI
-	Broker
-	Dealer
-	Authorizer
-	Interceptor
+	URI              URI
+	Broker           Broker
+	Dealer           Dealer
+	Authorizer       Authorizer
+	Interceptor      Interceptor
 	CRAuthenticators map[string]CRAuthenticator
 	Authenticators   map[string]Authenticator
 	// DefaultAuth      func(details map[string]interface{}) (map[string]interface{}, error)
 	AuthTimeout time.Duration
 	clients     map[ID]*Session
-	localClient
-	acts chan func()
+
+	localClient *localClient
+
+	ctx       context.Context
+	ctxCancel context.CancelFunc
 }
 
-type localClient struct {
-	*Client
-}
-
-func (r *Realm) getPeer(details map[string]interface{}) (Peer, error) {
-	peerA, peerB := localPipe()
-	if details == nil {
-		details = make(map[string]interface{})
-	}
-	sess := Session{Peer: peerA, Id: NewID(), Details: details, kill: make(chan URI, 1)}
-	go r.handleSession(&sess)
-	log.Println("Established internal session:", sess)
-	return peerB, nil
-}
-
-// Close disconnects all clients after sending a goodbye message
 func (r Realm) Close() {
-	r.acts <- func() {
-		for _, client := range r.clients {
-			client.kill <- ErrSystemShutdown
-		}
-	}
-
-	var (
-		sync     = make(chan struct{})
-		nclients int
-	)
-	for {
-		r.acts <- func() {
-			nclients = len(r.clients)
-			sync <- struct{}{}
-		}
-		<-sync
-		if nclients == 0 {
-			break
-		}
-	}
-
-	close(r.acts)
+	r.ctxCancel()
 }
 
-func (r *Realm) init() {
+func (r *Realm) init(ctx context.Context) error {
+	// initialize some things
 	r.clients = make(map[ID]*Session)
-	r.acts = make(chan func())
-	p, _ := r.getPeer(nil)
-	r.localClient.Client = NewClient(p)
+
+	// ensure all the t
 	if r.Broker == nil {
 		r.Broker = NewDefaultBroker()
 	}
@@ -89,33 +57,35 @@ func (r *Realm) init() {
 	if r.AuthTimeout == 0 {
 		r.AuthTimeout = defaultAuthTimeout
 	}
+
+	r.ctx, r.ctxCancel = context.WithCancel(ctx)
+
+	p, err := r.getPeer(nil)
+	if nil != err {
+		return err
+	}
+	r.localClient.Client = NewClient(p)
+
 	go r.localClient.Receive()
 	go r.run()
+
+	return nil
 }
 
+// Close disconnects all clients after sending a goodbye message
 func (r *Realm) run() {
-	for {
-		if act, ok := <-r.acts; ok {
-			act()
-		} else {
-			return
-		}
-	}
-}
+	// wait for context to be cancelled.
+	<-r.ctx.Done()
 
-func (l *localClient) onJoin(details map[string]interface{}) {
-	l.Publish("wamp.session.on_join", nil, []interface{}{details}, nil)
-}
-
-func (l *localClient) onLeave(session ID) {
-	l.Publish("wamp.session.on_leave", nil, []interface{}{session}, nil)
+	// log stuff
+	log.Printf("Realm \"%s\" is closing.  Reason: %s", string(r.URI), r.ctx.Err())
 }
 
 func (r *Realm) handleSession(sess *Session) {
 	sync := make(chan struct{})
 	r.acts <- func() {
 		r.clients[sess.Id] = sess
-		r.onJoin(sess.Details)
+		r.localClient.onJoin(sess.Details)
 		sync <- struct{}{}
 	}
 	<-sync
@@ -124,7 +94,7 @@ func (r *Realm) handleSession(sess *Session) {
 			delete(r.clients, sess.Id)
 			r.Dealer.RemoveSession(sess)
 			r.Broker.RemoveSession(sess)
-			r.onLeave(sess.Id)
+			r.localClient.onLeave(sess.Id)
 		}
 	}()
 	c := sess.Receive()
@@ -184,7 +154,7 @@ func (r *Realm) handleSession(sess *Session) {
 			log.Printf("[%s] leaving: %v", sess, msg.Reason)
 			return
 
-		// Broker messages
+			// Broker incomingMessages
 		case *Publish:
 			r.Broker.Publish(sess, msg)
 		case *Subscribe:
@@ -192,7 +162,7 @@ func (r *Realm) handleSession(sess *Session) {
 		case *Unsubscribe:
 			r.Broker.Unsubscribe(sess, msg)
 
-		// Dealer messages
+			// Dealer incomingMessages
 		case *Register:
 			r.Dealer.Register(sess, msg)
 		case *Unregister:
@@ -202,7 +172,7 @@ func (r *Realm) handleSession(sess *Session) {
 		case *Yield:
 			r.Dealer.Yield(sess, msg)
 
-		// Error messages
+			// Error incomingMessages
 		case *Error:
 			if msg.Type == MessageTypeInvocation {
 				// the only type of ERROR message the router should receive
@@ -256,7 +226,7 @@ func (r Realm) authenticate(details map[string]interface{}) (Message, error) {
 	// For now, the tests just explicitly send a []interface{}
 	_authmethods, ok := details["authmethods"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("No authentication supplied")
+		return nil, errors.New("No authentication supplied")
 	}
 	authmethods := []string{}
 	for _, method := range _authmethods {
@@ -283,20 +253,43 @@ func (r Realm) authenticate(details map[string]interface{}) (Message, error) {
 		}
 	}
 	// TODO: check default auth (special '*' auth?)
-	return nil, fmt.Errorf("could not authenticate with any method")
+	return nil, errors.New("could not authenticate with any method")
 }
 
 // checkResponse determines whether the response to the challenge is sufficient to gain access to the Realm.
 func (r Realm) checkResponse(chal *Challenge, auth *Authenticate) (*Welcome, error) {
 	authenticator, ok := r.CRAuthenticators[chal.AuthMethod]
 	if !ok {
-		return nil, fmt.Errorf("authentication method has been removed")
+		return nil, errors.New("authentication method has been removed")
 	}
 	if details, err := authenticator.Authenticate(chal.Extra, auth.Signature); err != nil {
 		return nil, err
 	} else {
 		return &Welcome{Details: addAuthMethod(details, chal.AuthMethod)}, nil
 	}
+}
+
+func (r *Realm) getPeer(details map[string]interface{}) (Peer, error) {
+	peerA, peerB := localPipe()
+	if details == nil {
+		details = make(map[string]interface{})
+	}
+	sess := Session{Peer: peerA, Id: NewID(), Details: details, kill: make(chan URI, 1)}
+	go r.handleSession(&sess)
+	log.Println("Established internal session:", sess)
+	return peerB, nil
+}
+
+type localClient struct {
+	*Client
+}
+
+func (l *localClient) onJoin(details map[string]interface{}) {
+	l.Publish("wamp.session.on_join", nil, []interface{}{details}, nil)
+}
+
+func (l *localClient) onLeave(session ID) {
+	l.Publish("wamp.session.on_leave", nil, []interface{}{session}, nil)
 }
 
 func addAuthMethod(details map[string]interface{}, method string) map[string]interface{} {

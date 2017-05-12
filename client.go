@@ -25,7 +25,7 @@ var (
 	}
 )
 
-// A Client routes messages to/from a WAMP router.
+// A Client routes incomingMessages to/from a WAMP router.
 type Client struct {
 	Peer
 	// ReceiveTimeout is the amount of time that the client will block waiting for a response from the router.
@@ -54,7 +54,7 @@ type eventDesc struct {
 // NewWebsocketClient creates a new websocket client connected to the specified
 // `url` and using the specified `serialization`.
 func NewWebsocketClient(serialization Serialization, url string, tlscfg *tls.Config, dial DialFunc) (*Client, error) {
-	p, err := NewWebsocketPeer(serialization, url, tlscfg, dial)
+	p, err := NewWebSocketPeer(serialization, url, tlscfg, dial)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +227,7 @@ func (c *Client) Close() error {
 // 	return ID(c.requestCount)
 // }
 
-// Receive handles messages from the server until this client disconnects.
+// Receive handles incomingMessages from the server until this client disconnects.
 //
 // This function blocks and is most commonly run in a goroutine.
 func (c *Client) Receive() {

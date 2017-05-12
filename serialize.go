@@ -112,7 +112,7 @@ func applySlice(dst reflect.Value, src reflect.Value) error {
 }
 
 // Serializer is the interface implemented by an object that can serialize and
-// deserialize WAMP messages
+// deserialize WAMP incomingMessages
 type Serializer interface {
 	Serialize(Message) ([]byte, error)
 	Deserialize([]byte) (Message, error)
