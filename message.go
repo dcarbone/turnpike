@@ -4,6 +4,52 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync"
+)
+
+// URIs are dot-separated identifiers, where each component *should* only contain letters, numbers or underscores.
+//
+// See the documentation for specifics: http://wamp-proto.org/static/rfc/draft-oberstet-hybi-crossbar-wamp.html#rfc.section.5.1.1
+type URI string
+
+// An ID is a unique, non-negative number. Different uses may have additional restrictions.
+type ID uint64
+
+type MessageType int
+
+// constants sourced from: http://wamp-proto.org/static/rfc/draft-oberstet-hybi-crossbar-wamp.html#rfc.section.6.5
+const (
+	MessageTypeHello        MessageType = 1
+	MessageTypeWelcome      MessageType = 2
+	MessageTypeAbort        MessageType = 3
+	MessageTypeChallenge    MessageType = 4
+	MessageTypeAuthenticate MessageType = 5
+	MessageTypeGoodbye      MessageType = 6
+	MessageTypeError        MessageType = 8
+
+	MessageTypePublish   MessageType = 16
+	MessageTypePublished MessageType = 17
+
+	MessageTypeSubscribe    MessageType = 32
+	MessageTypeSubscribed   MessageType = 33
+	MessageTypeUnsubscribe  MessageType = 34
+	MessageTypeUnsubscribed MessageType = 35
+	MessageTypeEvent        MessageType = 36
+
+	MessageTypeCall   MessageType = 48
+	MessageTypeCancel MessageType = 49
+	MessageTypeResult MessageType = 50
+
+	MessageTypeRegister     MessageType = 64
+	MessageTypeRegistered   MessageType = 65
+	MessageTypeUnregister   MessageType = 66
+	MessageTypeUnregistered MessageType = 67
+	MessageTypeInvocation   MessageType = 68
+	MessageTypeInterrupt    MessageType = 69
+	MessageTypeYield        MessageType = 70
+
+	MessageTypeExtensionMin MessageType = 256
+	MessageTypeExtensionMax MessageType = 1023
 )
 
 // Message is a generic container for a WAMP message.
@@ -12,168 +58,207 @@ type Message interface {
 	Context() context.Context
 }
 
-type MessageType int
+// ExtensionMessage is a generic container for WAMP message extensions
+type ExtensionMessage interface {
+	MessageType() MessageType
+	MessageTypeName() string
+	Context() context.Context
+	SetContext(context.Context)
+}
+
+var extensions = map[MessageType]ExtensionMessage{}
+var extensionsLock = sync.RWMutex{}
+
+// RegisterExtensionMessage allows you to specify a custom message type for use within your implementation.
+func RegisterExtensionMessage(mt MessageType, proto ExtensionMessage) error {
+
+	// TODO: This could probably be made MUCH simpler...
+
+	var protoType reflect.Type
+	var protoKind reflect.Kind
+
+	// validate type value
+	if mt < MessageTypeExtensionMin || mt > MessageTypeExtensionMax {
+		return fmt.Errorf(
+			"Extension Messages must have a type value in range [%d...%d], %d provided",
+			MessageTypeExtensionMin,
+			MessageTypeExtensionMax,
+			mt)
+	}
+
+	// get type
+	protoType = reflect.TypeOf(proto)
+
+	// check for pointer
+	if protoKind == reflect.Ptr {
+		protoType = protoType.Elem()
+	}
+
+	// get kind
+	protoKind = protoType.Kind()
+
+	// only allow structs
+	if protoType.Kind() != reflect.Struct {
+		return fmt.Errorf("Message implementation must be struct, %s provided", protoType)
+	}
+
+	// lock map
+	extensionsLock.Lock()
+	defer extensionsLock.Unlock()
+
+	// create empty message
+	extensions[mt] = reflect.New(protoType).Interface().(ExtensionMessage)
+
+	return nil
+}
+
+// NewExtensionMessage will attempt to construct a new instance of an extension message type
+func NewExtensionMessage(ctx context.Context, mt MessageType) (ExtensionMessage, error) {
+	extensionsLock.RLock()
+	defer extensionsLock.RUnlock()
+
+	// has extension been defined?
+	proto, ok := extensions[mt]
+	if !ok {
+		return nil, fmt.Errorf("\"%d\" is not a registered message extension type", mt)
+	}
+
+	// create new message
+	msg := reflect.New(reflect.Type(proto)).Interface().(ExtensionMessage)
+
+	// set context
+	msg.SetContext(ctx)
+
+	return msg, nil
+}
 
 func (mt MessageType) New(ctx context.Context) Message {
 	switch mt {
-	case HELLO:
+	case MessageTypeHello:
 		return &Hello{ctx: ctx}
-	case WELCOME:
+	case MessageTypeWelcome:
 		return &Welcome{ctx: ctx}
-	case ABORT:
+	case MessageTypeAbort:
 		return &Abort{ctx: ctx}
-	case CHALLENGE:
+	case MessageTypeChallenge:
 		return &Challenge{ctx: ctx}
-	case AUTHENTICATE:
+	case MessageTypeAuthenticate:
 		return &Authenticate{ctx: ctx}
-	case GOODBYE:
+	case MessageTypeGoodbye:
 		return &Goodbye{ctx: ctx}
-	case ERROR:
+	case MessageTypeError:
 		return &Error{ctx: ctx}
 
-	case PUBLISH:
+	case MessageTypePublish:
 		return &Publish{ctx: ctx}
-	case PUBLISHED:
+	case MessageTypePublished:
 		return &Published{ctx: ctx}
 
-	case SUBSCRIBE:
+	case MessageTypeSubscribe:
 		return &Subscribe{ctx: ctx}
-	case SUBSCRIBED:
+	case MessageTypeSubscribed:
 		return &Subscribed{ctx: ctx}
-	case UNSUBSCRIBE:
+	case MessageTypeUnsubscribe:
 		return &Unsubscribe{ctx: ctx}
-	case UNSUBSCRIBED:
+	case MessageTypeUnsubscribed:
 		return &Unsubscribed{ctx: ctx}
-	case EVENT:
+	case MessageTypeEvent:
 		return &Event{ctx: ctx}
 
-	case CALL:
+	case MessageTypeCall:
 		return &Call{ctx: ctx}
-	case CANCEL:
+	case MessageTypeCancel:
 		return &Cancel{ctx: ctx}
-	case RESULT:
+	case MessageTypeResult:
 		return &Result{ctx: ctx}
 
-	case REGISTER:
+	case MessageTypeRegister:
 		return &Register{ctx: ctx}
-	case REGISTERED:
+	case MessageTypeRegistered:
 		return &Registered{ctx: ctx}
-	case UNREGISTER:
+	case MessageTypeUnregister:
 		return &Unregister{ctx: ctx}
-	case UNREGISTERED:
+	case MessageTypeUnregistered:
 		return &Unregistered{ctx: ctx}
-	case INVOCATION:
+	case MessageTypeInvocation:
 		return &Invocation{ctx: ctx}
-	case INTERRUPT:
+	case MessageTypeInterrupt:
 		return &Interrupt{ctx: ctx}
-	case YIELD:
+	case MessageTypeYield:
 		return &Yield{ctx: ctx}
 	default:
-		return CustomMessage{"ctx": ctx}
+		msg, err := NewExtensionMessage(ctx, mt)
+		if nil != err {
+			panic(err.Error())
+		}
+		return msg
 	}
 }
 
 func (mt MessageType) String() string {
 	switch mt {
-	case HELLO:
+	case MessageTypeHello:
 		return "HELLO"
-	case WELCOME:
+	case MessageTypeWelcome:
 		return "WELCOME"
-	case ABORT:
+	case MessageTypeAbort:
 		return "ABORT"
-	case CHALLENGE:
+	case MessageTypeChallenge:
 		return "CHALLENGE"
-	case AUTHENTICATE:
+	case MessageTypeAuthenticate:
 		return "AUTHENTICATE"
-	case GOODBYE:
+	case MessageTypeGoodbye:
 		return "GOODBYE"
-	case ERROR:
+	case MessageTypeError:
 		return "ERROR"
 
-	case PUBLISH:
+	case MessageTypePublish:
 		return "PUBLISH"
-	case PUBLISHED:
+	case MessageTypePublished:
 		return "PUBLISHED"
 
-	case SUBSCRIBE:
+	case MessageTypeSubscribe:
 		return "SUBSCRIBE"
-	case SUBSCRIBED:
+	case MessageTypeSubscribed:
 		return "SUBSCRIBED"
-	case UNSUBSCRIBE:
+	case MessageTypeUnsubscribe:
 		return "UNSUBSCRIBE"
-	case UNSUBSCRIBED:
+	case MessageTypeUnsubscribed:
 		return "UNSUBSCRIBED"
-	case EVENT:
+	case MessageTypeEvent:
 		return "EVENT"
 
-	case CALL:
+	case MessageTypeCall:
 		return "CALL"
-	case CANCEL:
+	case MessageTypeCancel:
 		return "CANCEL"
-	case RESULT:
+	case MessageTypeResult:
 		return "RESULT"
 
-	case REGISTER:
+	case MessageTypeRegister:
 		return "REGISTER"
-	case REGISTERED:
+	case MessageTypeRegistered:
 		return "REGISTERED"
-	case UNREGISTER:
+	case MessageTypeUnregister:
 		return "UNREGISTER"
-	case UNREGISTERED:
+	case MessageTypeUnregistered:
 		return "UNREGISTERED"
-	case INVOCATION:
+	case MessageTypeInvocation:
 		return "INVOCATION"
-	case INTERRUPT:
+	case MessageTypeInterrupt:
 		return "INTERRUPT"
-	case YIELD:
+	case MessageTypeYield:
 		return "YIELD"
 	default:
-		return "CUSTOM"
+		msg, err := NewExtensionMessage(nil, mt)
+		if nil != err {
+			panic(err.Error())
+		}
+		return msg.MessageTypeName()
 	}
 }
 
-const (
-	HELLO        MessageType = 1
-	WELCOME      MessageType = 2
-	ABORT        MessageType = 3
-	CHALLENGE    MessageType = 4
-	AUTHENTICATE MessageType = 5
-	GOODBYE      MessageType = 6
-	ERROR        MessageType = 8
-
-	PUBLISH   MessageType = 16 //	Tx 	Rx
-	PUBLISHED MessageType = 17 //	Rx 	Tx
-
-	SUBSCRIBE    MessageType = 32 //	Rx 	Tx
-	SUBSCRIBED   MessageType = 33 //	Tx 	Rx
-	UNSUBSCRIBE  MessageType = 34 //	Rx 	Tx
-	UNSUBSCRIBED MessageType = 35 //	Tx 	Rx
-	EVENT        MessageType = 36 //	Tx 	Rx
-
-	CALL   MessageType = 48 //	Tx 	Rx
-	CANCEL MessageType = 49 //	Tx 	Rx
-	RESULT MessageType = 50 //	Rx 	Tx
-
-	REGISTER     MessageType = 64 //	Rx 	Tx
-	REGISTERED   MessageType = 65 //	Tx 	Rx
-	UNREGISTER   MessageType = 66 //	Rx 	Tx
-	UNREGISTERED MessageType = 67 //	Tx 	Rx
-	INVOCATION   MessageType = 68 //	Tx 	Rx
-	INTERRUPT    MessageType = 69 //	Tx 	Rx
-	YIELD        MessageType = 70 //	Rx 	Tx
-
-	CUSTOM_MESSAGE MessageType = 80
-)
-
-// URIs are dot-separated identifiers, where each component *should* only contain letters, numbers or underscores.
-//
-// See the documentation for specifics: https://github.com/wamp-proto/wamp-proto/blob/master/rfc/text/basic/bp_identifiers.md#uris-uris
-type URI string
-
-// An ID is a unique, non-negative number. Different uses may have additional restrictions.
-type ID uint64
-
-// [HELLO, Realm|uri, Details|dict]
+// [MessageTypeHello, Realm|uri, Details|dict]
 type Hello struct {
 	ctx     context.Context
 	Realm   URI
@@ -181,14 +266,14 @@ type Hello struct {
 }
 
 func (msg *Hello) MessageType() MessageType {
-	return HELLO
+	return MessageTypeHello
 }
 
 func (msg *Hello) Context() context.Context {
 	return msg.ctx
 }
 
-// [WELCOME, Session|id, Details|dict]
+// [MessageTypeWelcome, Session|id, Details|dict]
 type Welcome struct {
 	ctx     context.Context
 	Id      ID
@@ -196,14 +281,14 @@ type Welcome struct {
 }
 
 func (msg *Welcome) MessageType() MessageType {
-	return WELCOME
+	return MessageTypeWelcome
 }
 
 func (msg *Welcome) Context() context.Context {
 	return msg.ctx
 }
 
-// [ABORT, Details|dict, Reason|uri]
+// [MessageTypeAbort, Details|dict, Reason|uri]
 type Abort struct {
 	ctx     context.Context
 	Details map[string]interface{}
@@ -211,14 +296,14 @@ type Abort struct {
 }
 
 func (msg *Abort) MessageType() MessageType {
-	return ABORT
+	return MessageTypeAbort
 }
 
 func (msg *Abort) Context() context.Context {
 	return msg.ctx
 }
 
-// [CHALLENGE, AuthMethod|string, Extra|dict]
+// [MessageTypeChallenge, AuthMethod|string, Extra|dict]
 type Challenge struct {
 	ctx        context.Context
 	AuthMethod string
@@ -226,14 +311,14 @@ type Challenge struct {
 }
 
 func (msg *Challenge) MessageType() MessageType {
-	return CHALLENGE
+	return MessageTypeChallenge
 }
 
 func (msg *Challenge) Context() context.Context {
 	return msg.ctx
 }
 
-// [AUTHENTICATE, Signature|string, Extra|dict]
+// [MessageTypeAuthenticate, Signature|string, Extra|dict]
 type Authenticate struct {
 	ctx       context.Context
 	Signature string
@@ -241,14 +326,14 @@ type Authenticate struct {
 }
 
 func (msg *Authenticate) MessageType() MessageType {
-	return AUTHENTICATE
+	return MessageTypeAuthenticate
 }
 
 func (msg *Authenticate) Context() context.Context {
 	return msg.ctx
 }
 
-// [GOODBYE, Details|dict, Reason|uri]
+// [MessageTypeGoodbye, Details|dict, Reason|uri]
 type Goodbye struct {
 	ctx     context.Context
 	Details map[string]interface{}
@@ -256,16 +341,16 @@ type Goodbye struct {
 }
 
 func (msg *Goodbye) MessageType() MessageType {
-	return GOODBYE
+	return MessageTypeGoodbye
 }
 
 func (msg *Goodbye) Context() context.Context {
 	return msg.ctx
 }
 
-// [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri]
-// [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list]
-// [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list, ArgumentsKw|dict]
+// [MessageTypeError, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri]
+// [MessageTypeError, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list]
+// [MessageTypeError, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list, ArgumentsKw|dict]
 type Error struct {
 	ctx         context.Context
 	Type        MessageType
@@ -277,16 +362,16 @@ type Error struct {
 }
 
 func (msg *Error) MessageType() MessageType {
-	return ERROR
+	return MessageTypeError
 }
 
 func (msg *Error) Context() context.Context {
 	return msg.ctx
 }
 
-// [PUBLISH, Request|id, Options|dict, Topic|uri]
-// [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list]
-// [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list, ArgumentsKw|dict]
+// [MessageTypePublish, Request|id, Options|dict, Topic|uri]
+// [MessageTypePublish, Request|id, Options|dict, Topic|uri, Arguments|list]
+// [MessageTypePublish, Request|id, Options|dict, Topic|uri, Arguments|list, ArgumentsKw|dict]
 type Publish struct {
 	ctx         context.Context
 	Request     ID
@@ -297,14 +382,14 @@ type Publish struct {
 }
 
 func (msg *Publish) MessageType() MessageType {
-	return PUBLISH
+	return MessageTypePublish
 }
 
 func (msg *Publish) Context() context.Context {
 	return msg.ctx
 }
 
-// [PUBLISHED, PUBLISH.Request|id, Publication|id]
+// [MessageTypePublished, MessageTypePublish.Request|id, Publication|id]
 type Published struct {
 	ctx         context.Context
 	Request     ID
@@ -312,14 +397,14 @@ type Published struct {
 }
 
 func (msg *Published) MessageType() MessageType {
-	return PUBLISHED
+	return MessageTypePublished
 }
 
 func (msg *Published) Context() context.Context {
 	return msg.ctx
 }
 
-// [SUBSCRIBE, Request|id, Options|dict, Topic|uri]
+// [MessageTypeSubscribe, Request|id, Options|dict, Topic|uri]
 type Subscribe struct {
 	ctx     context.Context
 	Request ID
@@ -328,14 +413,14 @@ type Subscribe struct {
 }
 
 func (msg *Subscribe) MessageType() MessageType {
-	return SUBSCRIBE
+	return MessageTypeSubscribe
 }
 
 func (msg *Subscribe) Context() context.Context {
 	return msg.ctx
 }
 
-// [SUBSCRIBED, SUBSCRIBE.Request|id, Subscription|id]
+// [MessageTypeSubscribed, MessageTypeSubscribe.Request|id, Subscription|id]
 type Subscribed struct {
 	ctx          context.Context
 	Request      ID
@@ -343,14 +428,14 @@ type Subscribed struct {
 }
 
 func (msg *Subscribed) MessageType() MessageType {
-	return SUBSCRIBED
+	return MessageTypeSubscribed
 }
 
 func (msg *Subscribed) Context() context.Context {
 	return msg.ctx
 }
 
-// [UNSUBSCRIBE, Request|id, SUBSCRIBED.Subscription|id]
+// [MessageTypeUnsubscribe, Request|id, MessageTypeSubscribed.Subscription|id]
 type Unsubscribe struct {
 	ctx          context.Context
 	Request      ID
@@ -358,31 +443,31 @@ type Unsubscribe struct {
 }
 
 func (msg *Unsubscribe) MessageType() MessageType {
-	return UNSUBSCRIBE
+	return MessageTypeUnsubscribe
 }
 
 func (msg *Unsubscribe) Context() context.Context {
 	return msg.ctx
 }
 
-// [UNSUBSCRIBED, UNSUBSCRIBE.Request|id]
+// [MessageTypeUnsubscribed, MessageTypeUnsubscribe.Request|id]
 type Unsubscribed struct {
 	ctx     context.Context
 	Request ID
 }
 
 func (msg *Unsubscribed) MessageType() MessageType {
-	return UNSUBSCRIBED
+	return MessageTypeUnsubscribed
 }
 
 func (msg *Unsubscribed) Context() context.Context {
 	return msg.ctx
 }
 
-// [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict]
-// [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list]
-// [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list,
-//     PUBLISH.ArgumentsKw|dict]
+// [MessageTypeEvent, MessageTypeSubscribed.Subscription|id, MessageTypePublished.Publication|id, Details|dict]
+// [MessageTypeEvent, MessageTypeSubscribed.Subscription|id, MessageTypePublished.Publication|id, Details|dict, MessageTypePublish.Arguments|list]
+// [MessageTypeEvent, MessageTypeSubscribed.Subscription|id, MessageTypePublished.Publication|id, Details|dict, MessageTypePublish.Arguments|list,
+//     MessageTypePublish.ArgumentsKw|dict]
 type Event struct {
 	ctx          context.Context
 	Subscription ID
@@ -393,23 +478,23 @@ type Event struct {
 }
 
 func (msg *Event) MessageType() MessageType {
-	return EVENT
+	return MessageTypeEvent
 }
 
 func (msg *Event) Context() context.Context {
 	return msg.ctx
 }
 
-// CallResult represents the result of a CALL.
+// CallResult represents the result of a MessageTypeCall.
 type CallResult struct {
 	Args   []interface{}
 	Kwargs map[string]interface{}
 	Err    URI
 }
 
-// [CALL, Request|id, Options|dict, Procedure|uri]
-// [CALL, Request|id, Options|dict, Procedure|uri, Arguments|list]
-// [CALL, Request|id, Options|dict, Procedure|uri, Arguments|list, ArgumentsKw|dict]
+// [MessageTypeCall, Request|id, Options|dict, Procedure|uri]
+// [MessageTypeCall, Request|id, Options|dict, Procedure|uri, Arguments|list]
+// [MessageTypeCall, Request|id, Options|dict, Procedure|uri, Arguments|list, ArgumentsKw|dict]
 type Call struct {
 	ctx         context.Context
 	Request     ID
@@ -420,16 +505,16 @@ type Call struct {
 }
 
 func (msg *Call) MessageType() MessageType {
-	return CALL
+	return MessageTypeCall
 }
 
 func (msg *Call) Context() context.Context {
 	return msg.ctx
 }
 
-// [RESULT, CALL.Request|id, Details|dict]
-// [RESULT, CALL.Request|id, Details|dict, YIELD.Arguments|list]
-// [RESULT, CALL.Request|id, Details|dict, YIELD.Arguments|list, YIELD.ArgumentsKw|dict]
+// [MessageTypeResult, MessageTypeCall.Request|id, Details|dict]
+// [MessageTypeResult, MessageTypeCall.Request|id, Details|dict, MessageTypeYield.Arguments|list]
+// [MessageTypeResult, MessageTypeCall.Request|id, Details|dict, MessageTypeYield.Arguments|list, MessageTypeYield.ArgumentsKw|dict]
 type Result struct {
 	ctx         context.Context
 	Request     ID
@@ -439,14 +524,14 @@ type Result struct {
 }
 
 func (msg *Result) MessageType() MessageType {
-	return RESULT
+	return MessageTypeResult
 }
 
 func (msg *Result) Context() context.Context {
 	return msg.ctx
 }
 
-// [REGISTER, Request|id, Options|dict, Procedure|uri]
+// [MessageTypeRegister, Request|id, Options|dict, Procedure|uri]
 type Register struct {
 	ctx       context.Context
 	Request   ID
@@ -455,14 +540,14 @@ type Register struct {
 }
 
 func (msg *Register) MessageType() MessageType {
-	return REGISTER
+	return MessageTypeRegister
 }
 
 func (msg *Register) Context() context.Context {
 	return msg.ctx
 }
 
-// [REGISTERED, REGISTER.Request|id, Registration|id]
+// [MessageTypeRegistered, MessageTypeRegister.Request|id, Registration|id]
 type Registered struct {
 	ctx          context.Context
 	Request      ID
@@ -470,14 +555,14 @@ type Registered struct {
 }
 
 func (msg *Registered) MessageType() MessageType {
-	return REGISTERED
+	return MessageTypeRegistered
 }
 
 func (msg *Registered) Context() context.Context {
 	return msg.ctx
 }
 
-// [UNREGISTER, Request|id, REGISTERED.Registration|id]
+// [MessageTypeUnregister, Request|id, MessageTypeRegistered.Registration|id]
 type Unregister struct {
 	ctx          context.Context
 	Request      ID
@@ -485,30 +570,30 @@ type Unregister struct {
 }
 
 func (msg *Unregister) MessageType() MessageType {
-	return UNREGISTER
+	return MessageTypeUnregister
 }
 
 func (msg *Unregister) Context() context.Context {
 	return msg.ctx
 }
 
-// [UNREGISTERED, UNREGISTER.Request|id]
+// [MessageTypeUnregistered, MessageTypeUnregister.Request|id]
 type Unregistered struct {
 	ctx     context.Context
 	Request ID
 }
 
 func (msg *Unregistered) MessageType() MessageType {
-	return UNREGISTERED
+	return MessageTypeUnregistered
 }
 
 func (msg *Unregistered) Context() context.Context {
 	return msg.ctx
 }
 
-// [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict]
-// [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict, CALL.Arguments|list]
-// [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict, CALL.Arguments|list, CALL.ArgumentsKw|dict]
+// [MessageTypeInvocation, Request|id, MessageTypeRegistered.Registration|id, Details|dict]
+// [MessageTypeInvocation, Request|id, MessageTypeRegistered.Registration|id, Details|dict, MessageTypeCall.Arguments|list]
+// [MessageTypeInvocation, Request|id, MessageTypeRegistered.Registration|id, Details|dict, MessageTypeCall.Arguments|list, MessageTypeCall.ArgumentsKw|dict]
 type Invocation struct {
 	ctx          context.Context
 	Request      ID
@@ -519,16 +604,16 @@ type Invocation struct {
 }
 
 func (msg *Invocation) MessageType() MessageType {
-	return INVOCATION
+	return MessageTypeInvocation
 }
 
 func (msg *Invocation) Context() context.Context {
 	return msg.ctx
 }
 
-// [YIELD, INVOCATION.Request|id, Options|dict]
-// [YIELD, INVOCATION.Request|id, Options|dict, Arguments|list]
-// [YIELD, INVOCATION.Request|id, Options|dict, Arguments|list, ArgumentsKw|dict]
+// [MessageTypeYield, MessageTypeInvocation.Request|id, Options|dict]
+// [MessageTypeYield, MessageTypeInvocation.Request|id, Options|dict, Arguments|list]
+// [MessageTypeYield, MessageTypeInvocation.Request|id, Options|dict, Arguments|list, ArgumentsKw|dict]
 type Yield struct {
 	ctx         context.Context
 	Request     ID
@@ -538,14 +623,14 @@ type Yield struct {
 }
 
 func (msg *Yield) MessageType() MessageType {
-	return YIELD
+	return MessageTypeYield
 }
 
 func (msg *Yield) Context() context.Context {
 	return msg.ctx
 }
 
-// [CANCEL, CALL.Request|id, Options|dict]
+// [MessageTypeCancel, MessageTypeCall.Request|id, Options|dict]
 type Cancel struct {
 	ctx     context.Context
 	Request ID
@@ -553,14 +638,14 @@ type Cancel struct {
 }
 
 func (msg *Cancel) MessageType() MessageType {
-	return CANCEL
+	return MessageTypeCancel
 }
 
 func (msg *Cancel) Context() context.Context {
 	return msg.ctx
 }
 
-// [INTERRUPT, INVOCATION.Request|id, Options|dict]
+// [MessageTypeInterrupt, MessageTypeInvocation.Request|id, Options|dict]
 type Interrupt struct {
 	ctx     context.Context
 	Request ID
@@ -568,31 +653,9 @@ type Interrupt struct {
 }
 
 func (msg *Interrupt) MessageType() MessageType {
-	return INTERRUPT
+	return MessageTypeInterrupt
 }
 
 func (msg *Interrupt) Context() context.Context {
 	return msg.ctx
-}
-
-type CustomMessage map[string]interface{}
-
-func (msg CustomMessage) MessageType() MessageType {
-	return CUSTOM_MESSAGE
-}
-
-func (msg CustomMessage) Context() context.Context {
-	v, ok := msg["ctx"]
-	if !ok {
-		panic("CustomMessage without context seen")
-	}
-
-	ctx, ok := v.(context.Context)
-	if !ok {
-		panic(fmt.Sprintf(
-			"CustomMessage has \"ctx\" key, but it is not of type \"context.Context\".  Type seen: %s",
-			reflect.TypeOf(ctx)))
-	}
-
-	return ctx
 }

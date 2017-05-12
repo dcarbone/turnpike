@@ -108,7 +108,7 @@ func (c *Client) JoinRealm(realm string, details map[string]interface{}) (map[st
 		c.Send(abortUnexpectedMsg)
 		c.Peer.Close()
 		close(c.acts)
-		return nil, fmt.Errorf(formatUnexpectedMessage(msg, WELCOME))
+		return nil, fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeWelcome))
 	} else {
 		go c.Receive()
 		return welcome.Details, nil
@@ -139,7 +139,7 @@ func (c *Client) joinRealmCRA(realm string, details map[string]interface{}) (map
 		c.Send(abortUnexpectedMsg)
 		c.Peer.Close()
 		close(c.acts)
-		return nil, fmt.Errorf(formatUnexpectedMessage(msg, CHALLENGE))
+		return nil, fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeChallenge))
 	} else if authFunc, ok := c.Auth[challenge.AuthMethod]; !ok {
 		c.Send(abortNoAuthHandler)
 		c.Peer.Close()
@@ -163,7 +163,7 @@ func (c *Client) joinRealmCRA(realm string, details map[string]interface{}) (map
 		c.Send(abortUnexpectedMsg)
 		c.Peer.Close()
 		close(c.acts)
-		return nil, fmt.Errorf(formatUnexpectedMessage(msg, WELCOME))
+		return nil, fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeWelcome))
 	} else {
 		go c.Receive()
 		return welcome.Details, nil
@@ -320,7 +320,7 @@ func (c *Client) handleInvocation(msg *Invocation) {
 
 				if result.Err != "" {
 					tosend = &Error{
-						Type:        INVOCATION,
+						Type:        MessageTypeInvocation,
 						Request:     msg.Request,
 						Details:     make(map[string]interface{}),
 						Arguments:   result.Args,
@@ -336,7 +336,7 @@ func (c *Client) handleInvocation(msg *Invocation) {
 		} else {
 			log.Println("no handler registered for registration:", msg.Registration)
 			if err := c.Send(&Error{
-				Type:    INVOCATION,
+				Type:    MessageTypeInvocation,
 				Request: msg.Request,
 				Details: make(map[string]interface{}),
 				Error:   URI(fmt.Sprintf("no handler for registration: %v", msg.Registration)),
@@ -405,14 +405,14 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Even
 	if err != nil {
 		return err
 	}
-	// wait to receive SUBSCRIBED message
+	// wait to receive MessageTypeSubscribed message
 	var msg Message
 	if msg, err = c.waitOnListener(id); err != nil {
 		return err
 	} else if e, ok := msg.(*Error); ok {
 		return fmt.Errorf("error subscribing to topic '%v': %v", topic, e.Error)
 	} else if subscribed, ok := msg.(*Subscribed); !ok {
-		return fmt.Errorf(formatUnexpectedMessage(msg, SUBSCRIBED))
+		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeSubscribed))
 	} else {
 		// register the event handler with this subscription
 		sync := make(chan struct{})
@@ -465,7 +465,7 @@ func (c *Client) Unsubscribe(topic string) error {
 	} else if e, ok := msg.(*Error); ok {
 		return fmt.Errorf("error unsubscribing to topic '%v': %v", topic, e.Error)
 	} else if _, ok := msg.(*Unsubscribed); !ok {
-		return fmt.Errorf(formatUnexpectedMessage(msg, UNSUBSCRIBED))
+		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeUnsubscribed))
 	}
 	c.acts <- func() {
 		delete(c.events, subscriptionID)
@@ -501,7 +501,7 @@ func (c *Client) Register(procedure string, fn MethodHandler, options map[string
 	} else if e, ok := msg.(*Error); ok {
 		return fmt.Errorf("error registering procedure '%v': %v", procedure, e.Error)
 	} else if registered, ok := msg.(*Registered); !ok {
-		return fmt.Errorf(formatUnexpectedMessage(msg, REGISTERED))
+		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeRegistered))
 	} else {
 		// register the event handler with this registration
 		sync := make(chan struct{})
@@ -565,7 +565,7 @@ func (c *Client) Unregister(procedure string) error {
 	} else if e, ok := msg.(*Error); ok {
 		return fmt.Errorf("error unregister to procedure '%v': %v", procedure, e.Error)
 	} else if _, ok := msg.(*Unregistered); !ok {
-		return fmt.Errorf(formatUnexpectedMessage(msg, UNREGISTERED))
+		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeUnregistered))
 	}
 	// register the event handler with this unregistration
 	c.acts <- func() {
@@ -623,7 +623,7 @@ func (c *Client) Call(procedure string, options map[string]interface{}, args []i
 	} else if e, ok := msg.(*Error); ok {
 		return nil, RPCError{e, procedure}
 	} else if result, ok := msg.(*Result); !ok {
-		return nil, fmt.Errorf(formatUnexpectedMessage(msg, RESULT))
+		return nil, fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeResult))
 	} else {
 		return result, nil
 	}

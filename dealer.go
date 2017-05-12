@@ -128,7 +128,7 @@ func (d *defaultDealer) Call(caller *Session, msg *Call) {
 			invocationID := NewID()
 			d.invocations[invocationID] = msg.Request
 			d.lock.Unlock()
-			details := map[string]interface{}{};
+			details := map[string]interface{}{}
 
 			// Options{"disclose_me": true} -> Details{"caller": 3335656}
 			if val, ok := msg.Options["disclose_me"]; ok {
@@ -195,7 +195,7 @@ func (d *defaultDealer) Error(peer *Session, msg *Error) {
 			d.lock.Unlock()
 			// return an error to the caller
 			caller.Send(&Error{
-				Type:        CALL,
+				Type:        MessageTypeCall,
 				Request:     callID,
 				Error:       msg.Error,
 				Details:     make(map[string]interface{}),

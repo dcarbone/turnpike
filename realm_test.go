@@ -12,9 +12,9 @@ func TestNoAuthentication(t *testing.T) {
 		realm := Realm{}
 		Convey("When a client is authenticated", func() {
 			msg, err := realm.authenticate(map[string]interface{}{})
-			Convey("Authenticate should return a Welcome message", func() {
+			Convey("Authenticate should return a WELCOME message", func() {
 				So(err, ShouldEqual, nil)
-				So(msg.MessageType(), ShouldEqual, WELCOME)
+				So(msg.MessageType(), ShouldEqual, MessageTypeWelcome)
 			})
 		})
 	})
@@ -61,9 +61,9 @@ func TestBasicAuthenticator(t *testing.T) {
 				"authmethods": []interface{}{"test"},
 			}
 			msg, err := realm.authenticate(details)
-			Convey("Authenticate should return a Welcome message", func() {
+			Convey("Authenticate should return a WELCOME message", func() {
 				So(err, ShouldEqual, nil)
-				So(msg.MessageType(), ShouldEqual, WELCOME)
+				So(msg.MessageType(), ShouldEqual, MessageTypeWelcome)
 			})
 			Convey("Authenticate should return correct details", func() {
 				So(msg.(*Welcome).Details["check"], ShouldEqual, "testing")
@@ -115,9 +115,9 @@ func TestCRAuthenticator(t *testing.T) {
 				"authmethods": []interface{}{"test"},
 			}
 			msg, err := realm.authenticate(details)
-			Convey("Authenticate should return a Challenge message", func() {
+			Convey("Authenticate should return a CHALLENGE message", func() {
 				So(err, ShouldEqual, nil)
-				So(msg.MessageType(), ShouldEqual, CHALLENGE)
+				So(msg.MessageType(), ShouldEqual, MessageTypeChallenge)
 			})
 			challenge := msg.(*Challenge)
 			Convey("When a client provides an invalid signature for the challenge", func() {
@@ -129,9 +129,9 @@ func TestCRAuthenticator(t *testing.T) {
 			Convey("When a client provides a valid signature for the challenge", func() {
 				auth := &Authenticate{Signature: testCRSign(challenge.Extra)}
 				msg, err := realm.checkResponse(challenge, auth)
-				Convey("CheckResponse should return a Welcome message", func() {
+				Convey("CheckResponse should return a WELCOME message", func() {
 					So(err, ShouldEqual, nil)
-					So(msg.MessageType(), ShouldEqual, WELCOME)
+					So(msg.MessageType(), ShouldEqual, MessageTypeWelcome)
 				})
 			})
 		})

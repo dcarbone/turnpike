@@ -94,7 +94,7 @@ func TestCall(t *testing.T) {
 			dealer.Call(callerSession, msg)
 
 			Convey("The callee should have received an INVOCATION message", func() {
-				So(callee.received.MessageType(), ShouldEqual, INVOCATION)
+				So(callee.received.MessageType(), ShouldEqual, MessageTypeInvocation)
 				inv := callee.received.(*Invocation)
 
 				Convey("And the callee responds with a YIELD message", func() {
@@ -102,7 +102,7 @@ func TestCall(t *testing.T) {
 					dealer.Yield(sess, msg)
 
 					Convey("The caller should have received a RESULT message", func() {
-						So(caller.received.MessageType(), ShouldEqual, RESULT)
+						So(caller.received.MessageType(), ShouldEqual, MessageTypeResult)
 						So(caller.received.(*Result).Request, ShouldEqual, 125)
 					})
 				})
@@ -112,7 +112,7 @@ func TestCall(t *testing.T) {
 					dealer.Error(sess, msg)
 
 					Convey("The caller should have received an ERROR message", func() {
-						So(caller.received.MessageType(), ShouldEqual, ERROR)
+						So(caller.received.MessageType(), ShouldEqual, MessageTypeError)
 						So(caller.received.(*Error).Request, ShouldEqual, 125)
 					})
 				})
@@ -141,7 +141,7 @@ func TestRemovePeer(t *testing.T) {
 			Convey("And registering the endpoint again should succeed", func() {
 				msg.Request = 124
 				dealer.Register(sess, msg)
-				So(callee.received.MessageType(), ShouldEqual, REGISTERED)
+				So(callee.received.MessageType(), ShouldEqual, MessageTypeRegistered)
 			})
 		})
 	})

@@ -14,7 +14,6 @@ const (
 // Clients that have connected to a WAMP router are joined to a realm and all
 // message delivery is handled by the realm.
 type Realm struct {
-	_   string
 	URI URI
 	Broker
 	Dealer
@@ -205,7 +204,7 @@ func (r *Realm) handleSession(sess *Session) {
 
 		// Error messages
 		case *Error:
-			if msg.Type == INVOCATION {
+			if msg.Type == MessageTypeInvocation {
 				// the only type of ERROR message the router should receive
 				r.Dealer.Error(sess, msg)
 			} else {
@@ -224,7 +223,7 @@ func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcom
 		return nil, err
 	}
 	// we should never get anything besides WELCOME and CHALLENGE
-	if msg.MessageType() == WELCOME {
+	if msg.MessageType() == MessageTypeWelcome {
 		return msg.(*Welcome), nil
 	}
 	// Challenge response

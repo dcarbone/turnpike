@@ -22,7 +22,7 @@ func TestJSONDeserialize(t *testing.T) {
 	tests := []test{
 		{
 			`[1,"some.realm",{}]`,
-			&Hello{"some.realm", make(map[string]interface{})},
+			&Hello{nil, "some.realm", make(map[string]interface{})},
 			2,
 		},
 	}
@@ -40,7 +40,7 @@ func TestJSONDeserialize(t *testing.T) {
 }
 
 func TestApplySlice(t *testing.T) {
-	const msgType = PUBLISH
+	const msgType = MessageTypePublish
 
 	pubArgs := []string{"hello", "world"}
 	Convey("Deserializing into a message with a slice", t, func() {
@@ -103,7 +103,7 @@ func TestToList(t *testing.T) {
 	}
 
 	for _, tst := range tests {
-		msg := &Event{0, 0, nil, tst.args, tst.kwArgs}
+		msg := &Event{nil, 0, 0, nil, tst.args, tst.kwArgs}
 		// +1 to account for the message type
 		numField := reflect.ValueOf(msg).Elem().NumField() + 1
 		exp := numField - tst.omit
