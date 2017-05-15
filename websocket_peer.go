@@ -71,117 +71,108 @@ func newWebSocketPeer(ctx context.Context, url, protocol string, serializer Seri
 	return ep, nil
 }
 
-// TODO: make this just add the message to a channel so we don't block
 func (ep *webSocketPeer) Send(msg Message) error {
 	ep.closedLock.RLock()
 	defer ep.closedLock.RUnlock()
 
+	// has peer already been closed?
 	if ep.closed {
 		return errors.New("Peer is closed")
 	}
 
-	ep.outgoingMessages <- msg
+	select {
+	// was context cancelled?
+	case <-msg.Context().Done():
+		return fmt.Errorf("Unable to send \"%s\", context has been closed: %s", msg.MessageType(), msg.Context().Err())
+
+	// push message to outgoing queue
+	case ep.outgoingMessages <- msg:
+	}
 
 	return nil
 }
-func (ep *webSocketPeer) Receive() <-chan Message {
-	return ep.incomingMessages
+func (ep *webSocketPeer) Receive(t time.Duration) (Message, error) {
+	ep.closedLock.RLock()
+	defer ep.closedLock.RUnlock()
+	if ep.closed {
+		return nil, errors.New("Peer is closed")
+	}
+
+	if 0 == int64(t) {
+		t = 1 * time.Second
+	}
+
+	ctx, _ := context.WithDeadline(ep.ctx, time.Now().Add(t))
+
+	select {
+	case msg, ok := <-ep.incomingMessages:
+		if !ok {
+			ep.Close()
+			return nil, errors.New("session lost")
+		}
+		return msg, nil
+
+	case <-ctx.Done():
+		return nil, ErrPeerReceiveTimeout
+	}
 }
 
 func (ep *webSocketPeer) Close() error {
 	ep.closedLock.RLock()
 	defer ep.closedLock.RUnlock()
 
+	// has peer already been closed?
 	if ep.closed {
 		return errors.New("Peer is already closed.")
 	}
 
-	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye")
-	err := ep.conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(5*time.Second))
-	if err != nil {
-		log.Println("error sending close message:", err)
-	}
-
+	// cancel our context
 	ep.ctxCancel()
 
-	return err
+	return nil
 }
 
 func (ep *webSocketPeer) run() {
-
-	go func() {
-		//var msgType int
-		//var payload []byte
-		//var err error
-		//
-		//for {
-		//	// read from connection...
-		//	msgType, payload, err := ep.conn.ReadMessage()
-		//	if nil != err {
-		//		// if we saw an error
-		//		if ep.closed {
-		//			// and the peer was closed
-		//
-		//		}
-		//		ep.closedLock.RUnlock()
-		//		return
-		//	}
-		//
-		//	// TODO: use conn.NextMessage() and stream
-		//	// TODO: do something different based on binary/text frames
-		//	if msgType, b, err := ep.conn.ReadMessage(); err != nil {
-		//		if ep.closed {
-		//			log.Println("peer connection closed")
-		//		} else {
-		//			log.Println("error reading from peer:", err)
-		//			ep.conn.Close()
-		//		}
-		//		close(ep.incomingMessages)
-		//		break
-		//	}
-		//
-		//	if msgType == websocket.CloseMessage {
-		//		ep.closedPolitely = true
-		//		ep.conn.Close()
-		//		close(ep.incomingMessages)
-		//		break
-		//	} else {
-		//		msg, err := ep.serializer.Deserialize(b)
-		//		if err != nil {
-		//			log.Println("error deserializing peer message:", err)
-		//			// TODO: handle error
-		//		} else {
-		//			ep.incomingMessages <- msg
-		//		}
-		//	}
-		//}
-	}()
-
 	for {
 		select {
 		case <-ep.ctx.Done():
-			log.Printf("Context closed: %s", ep.ctx.Err())
-
+			// close us
 			ep.closedLock.Lock()
 			ep.closed = true
 			ep.closedLock.Unlock()
 
+			// close our channels
 			close(ep.outgoingMessages)
 			close(ep.incomingMessages)
 
-			err := ep.conn.Close()
+			// construct close message
+			closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye")
+
+			// send with 1 second timeout
+			err := ep.conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(1*time.Second))
+			if err != nil {
+				log.Println("error sending close message:", err)
+			}
+
+			// attempt to close connection
+			err = ep.conn.Close()
 			if nil != err {
+				log.Println("error closing connection: %s", err)
 			}
 
 			return
 
 		case msg := <-ep.outgoingMessages:
+			// attempt to serialize outgoing message
 			if b, err := ep.serializer.Serialize(msg); nil == err {
+				// attempt to send
 				err = ep.conn.WriteMessage(ep.payloadType, b)
 				if nil != err {
+					// TODO: handle error
 					log.Printf("Unable to write message \"%+v\": %s", msg, err)
 				}
 			} else {
+				// TODO: Handle error?
 				log.Printf("Unable to serialize message \"%+v\": %s", msg, err)
 			}
 		}
