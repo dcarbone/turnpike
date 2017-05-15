@@ -1,9 +1,12 @@
 package turnpike
 
 import (
+	"errors"
 	"fmt"
 	"time"
 )
+
+var ErrPeerReceiveTimeout = errors.New("timeout waiting for message")
 
 // A Sender can send a message to its peer.
 //
@@ -22,8 +25,8 @@ type Peer interface {
 	// Multiple calls to Close() will have no effect.
 	Close() error
 
-	// Receive returns a channel of incomingMessages coming from the peer.
-	Receive() <-chan Message
+	// Receive will attempt to return an in-bound message
+	Receive(t time.Duration) (Message, error)
 }
 
 // GetMessageTimeout is a convenience function to get a single message from a
