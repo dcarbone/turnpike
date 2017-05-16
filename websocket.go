@@ -10,7 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type websocketPeer struct {
+type webSocketPeer struct {
 	conn        *websocket.Conn
 	serializer  Serializer
 	messages    chan Message
@@ -19,14 +19,14 @@ type websocketPeer struct {
 	sendMutex   sync.Mutex
 }
 
-func NewWebsocketPeer(serialization Serialization, url string, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
+func NewWebSocketPeer(serialization Serialization, url string, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
 	switch serialization {
 	case JSON:
-		return newWebsocketPeer(url, jsonWebsocketProtocol,
+		return newWebSocketPeer(url, jsonWebsocketProtocol,
 			new(JSONSerializer), websocket.TextMessage, tlscfg, dial,
 		)
 	case MSGPACK:
-		return newWebsocketPeer(url, msgpackWebsocketProtocol,
+		return newWebSocketPeer(url, msgpackWebsocketProtocol,
 			new(MessagePackSerializer), websocket.BinaryMessage, tlscfg, dial,
 		)
 	default:
@@ -34,7 +34,7 @@ func NewWebsocketPeer(serialization Serialization, url string, tlscfg *tls.Confi
 	}
 }
 
-func newWebsocketPeer(url, protocol string, serializer Serializer, payloadType int, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
+func newWebSocketPeer(url, protocol string, serializer Serializer, payloadType int, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
 	dialer := websocket.Dialer{
 		Subprotocols:    []string{protocol},
 		TLSClientConfig: tlscfg,
@@ -45,7 +45,7 @@ func newWebsocketPeer(url, protocol string, serializer Serializer, payloadType i
 	if err != nil {
 		return nil, err
 	}
-	ep := &websocketPeer{
+	ep := &webSocketPeer{
 		conn:        conn,
 		messages:    make(chan Message, 10),
 		serializer:  serializer,
@@ -57,7 +57,7 @@ func newWebsocketPeer(url, protocol string, serializer Serializer, payloadType i
 }
 
 // TODO: make this just add the message to a channel so we don't block
-func (ep *websocketPeer) Send(msg Message) error {
+func (ep *webSocketPeer) Send(msg Message) error {
 	b, err := ep.serializer.Serialize(msg)
 	if err != nil {
 		return err
@@ -66,10 +66,10 @@ func (ep *websocketPeer) Send(msg Message) error {
 	defer ep.sendMutex.Unlock()
 	return ep.conn.WriteMessage(ep.payloadType, b)
 }
-func (ep *websocketPeer) Receive() <-chan Message {
+func (ep *webSocketPeer) Receive() <-chan Message {
 	return ep.messages
 }
-func (ep *websocketPeer) Close() error {
+func (ep *webSocketPeer) Close() error {
 	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye")
 	err := ep.conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(5*time.Second))
 	if err != nil {
@@ -79,7 +79,7 @@ func (ep *websocketPeer) Close() error {
 	return ep.conn.Close()
 }
 
-func (ep *websocketPeer) run() {
+func (ep *webSocketPeer) run() {
 	for {
 		// TODO: use conn.NextMessage() and stream
 		// TODO: do something different based on binary/text frames
