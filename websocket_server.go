@@ -7,9 +7,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type WebSocketProtocol string
+
 const (
-	jsonWebsocketProtocol    = "wamp.2.json"
-	msgpackWebsocketProtocol = "wamp.2.msgpack"
+	WebSocketProtocolJSON    WebSocketProtocol = "wamp.2.json"
+	WebSocketProtocolMSGPack WebSocketProtocol = "wamp.2.msgpack"
 )
 
 type invalidPayload byte
@@ -34,7 +36,7 @@ type WebSocketServer struct {
 	Router
 	Upgrader *websocket.Upgrader
 
-	protocols map[string]protocol
+	protocols map[WebSocketProtocol]protocol
 
 	// The serializer to use for text frames. Defaults to JSONSerializer.
 	TextSerializer Serializer
@@ -65,25 +67,25 @@ func NewBasicWebSocketServer(uri string) *WebSocketServer {
 func newWebSocketServer(r Router) *WebSocketServer {
 	s := &WebSocketServer{
 		Router:    r,
-		protocols: make(map[string]protocol),
+		protocols: make(map[WebSocketProtocol]protocol),
 	}
 	s.Upgrader = &websocket.Upgrader{}
-	s.RegisterProtocol(jsonWebsocketProtocol, websocket.TextMessage, new(JSONSerializer))
-	s.RegisterProtocol(msgpackWebsocketProtocol, websocket.BinaryMessage, new(MessagePackSerializer))
+	s.RegisterProtocol(WebSocketProtocolJSON, websocket.TextMessage, new(JSONSerializer))
+	s.RegisterProtocol(WebSocketProtocolMSGPack, websocket.BinaryMessage, new(MessagePackSerializer))
 	return s
 }
 
 // RegisterProtocol registers a serializer that should be used for a given protocol string and payload type.
-func (s *WebSocketServer) RegisterProtocol(proto string, payloadType int, serializer Serializer) error {
-	log.Println("RegisterProtocol:", proto)
+func (s *WebSocketServer) RegisterProtocol(protocol WebSocketProtocol, payloadType int, serializer Serializer) error {
+	log.Println("RegisterProtocol:", protocol)
 	if payloadType != websocket.TextMessage && payloadType != websocket.BinaryMessage {
 		return invalidPayload(payloadType)
 	}
-	if _, ok := s.protocols[proto]; ok {
-		return protocolExists(proto)
+	if _, ok := s.protocols[protocol]; ok {
+		return protocolExists(protocol)
 	}
-	s.protocols[proto] = protocol{payloadType, serializer}
-	s.Upgrader.Subprotocols = append(s.Upgrader.Subprotocols, proto)
+	s.protocols[protocol] = protocol{payloadType, serializer}
+	s.Upgrader.Subprotocols = append(s.Upgrader.Subprotocols, string(protocol))
 	return nil
 }
 
@@ -108,13 +110,13 @@ func (s *WebSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.handleWebsocket(conn)
+	s.handleWebSocket(conn)
 }
 
-func (s *WebSocketServer) handleWebsocket(conn *websocket.Conn) {
+func (s *WebSocketServer) handleWebSocket(conn *websocket.Conn) {
 	var serializer Serializer
 	var payloadType int
-	if proto, ok := s.protocols[conn.Subprotocol()]; ok {
+	if proto, ok := s.protocols[WebSocketProtocol(conn.Subprotocol())]; ok {
 		serializer = proto.serializer
 		payloadType = proto.payloadType
 	} else {
@@ -122,10 +124,10 @@ func (s *WebSocketServer) handleWebsocket(conn *websocket.Conn) {
 		//       gorilla/websocket will reject the conncetion
 		//       if the subprotocol isn't registered
 		switch conn.Subprotocol() {
-		case jsonWebsocketProtocol:
+		case WebSocketProtocolJSON:
 			serializer = new(JSONSerializer)
 			payloadType = websocket.TextMessage
-		case msgpackWebsocketProtocol:
+		case WebSocketProtocolMSGPack:
 			serializer = new(MessagePackSerializer)
 			payloadType = websocket.BinaryMessage
 		default:
@@ -134,11 +136,7 @@ func (s *WebSocketServer) handleWebsocket(conn *websocket.Conn) {
 		}
 	}
 
-	peer, err := newWebSocketPeer(serializer, payloadType, conn)
-	if nil != err {
-		logErr(err)
-		return
-	}
+	peer := NewWebSocketPeer(serializer, payloadType, conn)
 
 	logErr(s.Router.Accept(&peer))
 }

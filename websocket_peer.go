@@ -1,13 +1,9 @@
 package turnpike
 
 import (
-	"crypto/tls"
-	"fmt"
-	"net/http"
+	"github.com/gorilla/websocket"
 	"sync"
 	"time"
-
-	"github.com/gorilla/websocket"
 )
 
 type webSocketPeer struct {
@@ -19,39 +15,7 @@ type webSocketPeer struct {
 	sendMutex   sync.Mutex
 }
 
-func NewWebSocketPeer(serialization Serialization, url string, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
-	var serializer Serializer
-	var payloadType int
-	var protocol string
-
-	switch serialization {
-	case JSON:
-		serializer = new(JSONSerializer)
-		payloadType = websocket.TextMessage
-		protocol = jsonWebsocketProtocol
-	case MSGPACK:
-		serializer = new(MessagePackSerializer)
-		payloadType = websocket.BinaryMessage
-		protocol = msgpackWebsocketProtocol
-	default:
-		return nil, fmt.Errorf("Unsupported serialization: %v", serialization)
-	}
-
-	dialer := websocket.Dialer{
-		Subprotocols:    []string{protocol},
-		TLSClientConfig: tlscfg,
-		Proxy:           http.ProxyFromEnvironment,
-		NetDial:         dial,
-	}
-	conn, _, err := dialer.Dial(url, nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return newWebSocketPeer(serializer, payloadType, conn)
-}
-
-func newWebSocketPeer(serializer Serializer, payloadType int, conn *websocket.Conn) (Peer, error) {
+func NewWebSocketPeer(serializer Serializer, payloadType int, conn *websocket.Conn) Peer {
 	ep := &webSocketPeer{
 		conn:        conn,
 		messages:    make(chan Message, 10),
@@ -61,7 +25,7 @@ func newWebSocketPeer(serializer Serializer, payloadType int, conn *websocket.Co
 
 	go ep.run()
 
-	return ep, nil
+	return ep
 }
 
 // TODO: make this just add the message to a channel so we don't block

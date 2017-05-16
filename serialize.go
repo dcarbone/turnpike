@@ -10,14 +10,14 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-// Serialization indicates the data serialization format used in a WAMP session
-type Serialization int
+// SerializationFormat indicates the data serialization format used in a WAMP session
+type SerializationFormat int
 
 const (
 	// Use JSON-encoded strings as a payload.
-	JSON Serialization = iota
+	SerializationFormatJSON SerializationFormat = iota
 	// Use msgpack-encoded strings as a payload.
-	MSGPACK
+	SerializationFormatMSGPack
 )
 
 // applies a list of values from a WAMP message to a message type
