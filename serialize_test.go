@@ -40,7 +40,7 @@ func TestJSONDeserialize(t *testing.T) {
 }
 
 func TestApplySlice(t *testing.T) {
-	const msgType = PUBLISH
+	const msgType = MessageTypePublish
 
 	pubArgs := []string{"hello", "world"}
 	Convey("Deserializing into a message with a slice", t, func() {

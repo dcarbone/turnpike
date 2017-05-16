@@ -205,7 +205,7 @@ func (r *Realm) handleSession(sess *Session) {
 
 		// Error messages
 		case *Error:
-			if msg.Type == INVOCATION {
+			if msg.Type == MessageTypeInvocation {
 				// the only type of ERROR message the router should receive
 				r.Dealer.Error(sess, msg)
 			} else {
@@ -224,7 +224,7 @@ func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcom
 		return nil, err
 	}
 	// we should never get anything besides WELCOME and CHALLENGE
-	if msg.MessageType() == WELCOME {
+	if msg.MessageType() == MessageTypeWelcome {
 		return msg.(*Welcome), nil
 	}
 	// Challenge response

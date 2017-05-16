@@ -13,7 +13,7 @@ func (client *basicPeer) Receive() <-chan Message {
 	return client.incoming
 }
 func (client *basicPeer) Send(msg Message) error {
-	if msg.MessageType() == GOODBYE {
+	if msg.MessageType() == MessageTypeGoodbye {
 		client.localPeer.Send(&Goodbye{})
 	}
 	return client.localPeer.Send(msg)
@@ -37,7 +37,7 @@ func basicConnect(t *testing.T, client *basicPeer, server Peer) Router {
 		t.Fatalf("Expected 1 message in the handshake, received %d", len(client.incoming))
 	}
 
-	if msg := <-client.incoming; msg.MessageType() != WELCOME {
+	if msg := <-client.incoming; msg.MessageType() != MessageTypeWelcome {
 		t.Fatal("Expected first message sent to be a welcome message")
 	}
 	return r
@@ -78,7 +78,7 @@ func TestInvalidRealm(t *testing.T) {
 		t.Fatalf("Expected a single message in the handshake, received %d", len(client.incoming))
 	}
 
-	if msg := <-client.incoming; msg.MessageType() != ABORT {
+	if msg := <-client.incoming; msg.MessageType() != MessageTypeAbort {
 		t.Errorf("Expected the handshake to be aborted")
 	}
 }
@@ -217,7 +217,7 @@ func TestRouterCall(t *testing.T) {
 	if err := r.Accept(&basicPeer{callerServer}); err != nil {
 		t.Fatal("Error connecting caller")
 	}
-	if msg := <-caller.incoming; msg.MessageType() != WELCOME {
+	if msg := <-caller.incoming; msg.MessageType() != MessageTypeWelcome {
 		t.Fatal("Expected first message sent to be a welcome message")
 	}
 	callID := NewID()

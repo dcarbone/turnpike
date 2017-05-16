@@ -7,59 +7,92 @@ type Message interface {
 
 type MessageType int
 
+const (
+	MessageTypeHello        MessageType = 1
+	MessageTypeWelcome      MessageType = 2
+	MessageTypeAbort        MessageType = 3
+	MessageTypeChallenge    MessageType = 4
+	MessageTypeAuthenticate MessageType = 5
+	MessageTypeGoodbye      MessageType = 6
+	MessageTypeError        MessageType = 8
+
+	MessageTypePublish   MessageType = 16 //	Tx 	Rx
+	MessageTypePublished MessageType = 17 //	Rx 	Tx
+
+	MessageTypeSubscribe    MessageType = 32 //	Rx 	Tx
+	MessageTypeSubscribed   MessageType = 33 //	Tx 	Rx
+	MessageTypeUnsubscribe  MessageType = 34 //	Rx 	Tx
+	MessageTypeUnsubscribed MessageType = 35 //	Tx 	Rx
+	MessageTypeEvent        MessageType = 36 //	Tx 	Rx
+
+	MessageTypeCall   MessageType = 48 //	Tx 	Rx
+	MessageTypeCancel MessageType = 49 //	Tx 	Rx
+	MessageTypeResult MessageType = 50 //	Rx 	Tx
+
+	MessageTypeRegister     MessageType = 64 //	Rx 	Tx
+	MessageTypeRegistered   MessageType = 65 //	Tx 	Rx
+	MessageTypeUnregister   MessageType = 66 //	Rx 	Tx
+	MessageTypeUnregistered MessageType = 67 //	Tx 	Rx
+	MessageTypeInvocation   MessageType = 68 //	Tx 	Rx
+	MessageTypeInterrupt    MessageType = 69 //	Tx 	Rx
+	MessageTypeYield        MessageType = 70 //	Rx 	Tx
+
+
+)
+
 func (mt MessageType) New() Message {
 	switch mt {
-	case HELLO:
+	case MessageTypeHello:
 		return new(Hello)
-	case WELCOME:
+	case MessageTypeWelcome:
 		return new(Welcome)
-	case ABORT:
+	case MessageTypeAbort:
 		return new(Abort)
-	case CHALLENGE:
+	case MessageTypeChallenge:
 		return new(Challenge)
-	case AUTHENTICATE:
+	case MessageTypeAuthenticate:
 		return new(Authenticate)
-	case GOODBYE:
+	case MessageTypeGoodbye:
 		return new(Goodbye)
-	case ERROR:
+	case MessageTypeError:
 		return new(Error)
 
-	case PUBLISH:
+	case MessageTypePublish:
 		return new(Publish)
-	case PUBLISHED:
+	case MessageTypePublished:
 		return new(Published)
 
-	case SUBSCRIBE:
+	case MessageTypeSubscribe:
 		return new(Subscribe)
-	case SUBSCRIBED:
+	case MessageTypeSubscribed:
 		return new(Subscribed)
-	case UNSUBSCRIBE:
+	case MessageTypeUnsubscribe:
 		return new(Unsubscribe)
-	case UNSUBSCRIBED:
+	case MessageTypeUnsubscribed:
 		return new(Unsubscribed)
-	case EVENT:
+	case MessageTypeEvent:
 		return new(Event)
 
-	case CALL:
+	case MessageTypeCall:
 		return new(Call)
-	case CANCEL:
+	case MessageTypeCancel:
 		return new(Cancel)
-	case RESULT:
+	case MessageTypeResult:
 		return new(Result)
 
-	case REGISTER:
+	case MessageTypeRegister:
 		return new(Register)
-	case REGISTERED:
+	case MessageTypeRegistered:
 		return new(Registered)
-	case UNREGISTER:
+	case MessageTypeUnregister:
 		return new(Unregister)
-	case UNREGISTERED:
+	case MessageTypeUnregistered:
 		return new(Unregistered)
-	case INVOCATION:
+	case MessageTypeInvocation:
 		return new(Invocation)
-	case INTERRUPT:
+	case MessageTypeInterrupt:
 		return new(Interrupt)
-	case YIELD:
+	case MessageTypeYield:
 		return new(Yield)
 	default:
 		// TODO: allow custom message types?
@@ -69,94 +102,63 @@ func (mt MessageType) New() Message {
 
 func (mt MessageType) String() string {
 	switch mt {
-	case HELLO:
+	case MessageTypeHello:
 		return "HELLO"
-	case WELCOME:
+	case MessageTypeWelcome:
 		return "WELCOME"
-	case ABORT:
+	case MessageTypeAbort:
 		return "ABORT"
-	case CHALLENGE:
+	case MessageTypeChallenge:
 		return "CHALLENGE"
-	case AUTHENTICATE:
+	case MessageTypeAuthenticate:
 		return "AUTHENTICATE"
-	case GOODBYE:
+	case MessageTypeGoodbye:
 		return "GOODBYE"
-	case ERROR:
+	case MessageTypeError:
 		return "ERROR"
 
-	case PUBLISH:
+	case MessageTypePublish:
 		return "PUBLISH"
-	case PUBLISHED:
+	case MessageTypePublished:
 		return "PUBLISHED"
 
-	case SUBSCRIBE:
+	case MessageTypeSubscribe:
 		return "SUBSCRIBE"
-	case SUBSCRIBED:
+	case MessageTypeSubscribed:
 		return "SUBSCRIBED"
-	case UNSUBSCRIBE:
+	case MessageTypeUnsubscribe:
 		return "UNSUBSCRIBE"
-	case UNSUBSCRIBED:
+	case MessageTypeUnsubscribed:
 		return "UNSUBSCRIBED"
-	case EVENT:
+	case MessageTypeEvent:
 		return "EVENT"
 
-	case CALL:
+	case MessageTypeCall:
 		return "CALL"
-	case CANCEL:
+	case MessageTypeCancel:
 		return "CANCEL"
-	case RESULT:
+	case MessageTypeResult:
 		return "RESULT"
 
-	case REGISTER:
+	case MessageTypeRegister:
 		return "REGISTER"
-	case REGISTERED:
+	case MessageTypeRegistered:
 		return "REGISTERED"
-	case UNREGISTER:
+	case MessageTypeUnregister:
 		return "UNREGISTER"
-	case UNREGISTERED:
+	case MessageTypeUnregistered:
 		return "UNREGISTERED"
-	case INVOCATION:
+	case MessageTypeInvocation:
 		return "INVOCATION"
-	case INTERRUPT:
+	case MessageTypeInterrupt:
 		return "INTERRUPT"
-	case YIELD:
+	case MessageTypeYield:
 		return "YIELD"
 	default:
 		// TODO: allow custom message types?
 		panic("Invalid message type")
 	}
 }
-
-const (
-	HELLO        MessageType = 1
-	WELCOME      MessageType = 2
-	ABORT        MessageType = 3
-	CHALLENGE    MessageType = 4
-	AUTHENTICATE MessageType = 5
-	GOODBYE      MessageType = 6
-	ERROR        MessageType = 8
-
-	PUBLISH   MessageType = 16 //	Tx 	Rx
-	PUBLISHED MessageType = 17 //	Rx 	Tx
-
-	SUBSCRIBE    MessageType = 32 //	Rx 	Tx
-	SUBSCRIBED   MessageType = 33 //	Tx 	Rx
-	UNSUBSCRIBE  MessageType = 34 //	Rx 	Tx
-	UNSUBSCRIBED MessageType = 35 //	Tx 	Rx
-	EVENT        MessageType = 36 //	Tx 	Rx
-
-	CALL   MessageType = 48 //	Tx 	Rx
-	CANCEL MessageType = 49 //	Tx 	Rx
-	RESULT MessageType = 50 //	Rx 	Tx
-
-	REGISTER     MessageType = 64 //	Rx 	Tx
-	REGISTERED   MessageType = 65 //	Tx 	Rx
-	UNREGISTER   MessageType = 66 //	Rx 	Tx
-	UNREGISTERED MessageType = 67 //	Tx 	Rx
-	INVOCATION   MessageType = 68 //	Tx 	Rx
-	INTERRUPT    MessageType = 69 //	Tx 	Rx
-	YIELD        MessageType = 70 //	Rx 	Tx
-)
 
 // URIs are dot-separated identifiers, where each component *should* only contain letters, numbers or underscores.
 //
@@ -173,7 +175,7 @@ type Hello struct {
 }
 
 func (msg *Hello) MessageType() MessageType {
-	return HELLO
+	return MessageTypeHello
 }
 
 // [WELCOME, Session|id, Details|dict]
@@ -183,7 +185,7 @@ type Welcome struct {
 }
 
 func (msg *Welcome) MessageType() MessageType {
-	return WELCOME
+	return MessageTypeWelcome
 }
 
 // [ABORT, Details|dict, Reason|uri]
@@ -193,7 +195,7 @@ type Abort struct {
 }
 
 func (msg *Abort) MessageType() MessageType {
-	return ABORT
+	return MessageTypeAbort
 }
 
 // [CHALLENGE, AuthMethod|string, Extra|dict]
@@ -203,7 +205,7 @@ type Challenge struct {
 }
 
 func (msg *Challenge) MessageType() MessageType {
-	return CHALLENGE
+	return MessageTypeChallenge
 }
 
 // [AUTHENTICATE, Signature|string, Extra|dict]
@@ -213,7 +215,7 @@ type Authenticate struct {
 }
 
 func (msg *Authenticate) MessageType() MessageType {
-	return AUTHENTICATE
+	return MessageTypeAuthenticate
 }
 
 // [GOODBYE, Details|dict, Reason|uri]
@@ -223,7 +225,7 @@ type Goodbye struct {
 }
 
 func (msg *Goodbye) MessageType() MessageType {
-	return GOODBYE
+	return MessageTypeGoodbye
 }
 
 // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri]
@@ -239,7 +241,7 @@ type Error struct {
 }
 
 func (msg *Error) MessageType() MessageType {
-	return ERROR
+	return MessageTypeError
 }
 
 // [PUBLISH, Request|id, Options|dict, Topic|uri]
@@ -254,7 +256,7 @@ type Publish struct {
 }
 
 func (msg *Publish) MessageType() MessageType {
-	return PUBLISH
+	return MessageTypePublish
 }
 
 // [PUBLISHED, PUBLISH.Request|id, Publication|id]
@@ -264,7 +266,7 @@ type Published struct {
 }
 
 func (msg *Published) MessageType() MessageType {
-	return PUBLISHED
+	return MessageTypePublished
 }
 
 // [SUBSCRIBE, Request|id, Options|dict, Topic|uri]
@@ -275,7 +277,7 @@ type Subscribe struct {
 }
 
 func (msg *Subscribe) MessageType() MessageType {
-	return SUBSCRIBE
+	return MessageTypeSubscribe
 }
 
 // [SUBSCRIBED, SUBSCRIBE.Request|id, Subscription|id]
@@ -285,7 +287,7 @@ type Subscribed struct {
 }
 
 func (msg *Subscribed) MessageType() MessageType {
-	return SUBSCRIBED
+	return MessageTypeSubscribed
 }
 
 // [UNSUBSCRIBE, Request|id, SUBSCRIBED.Subscription|id]
@@ -295,7 +297,7 @@ type Unsubscribe struct {
 }
 
 func (msg *Unsubscribe) MessageType() MessageType {
-	return UNSUBSCRIBE
+	return MessageTypeUnsubscribe
 }
 
 // [UNSUBSCRIBED, UNSUBSCRIBE.Request|id]
@@ -304,7 +306,7 @@ type Unsubscribed struct {
 }
 
 func (msg *Unsubscribed) MessageType() MessageType {
-	return UNSUBSCRIBED
+	return MessageTypeUnsubscribed
 }
 
 // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict]
@@ -320,7 +322,7 @@ type Event struct {
 }
 
 func (msg *Event) MessageType() MessageType {
-	return EVENT
+	return MessageTypeEvent
 }
 
 // CallResult represents the result of a CALL.
@@ -342,7 +344,7 @@ type Call struct {
 }
 
 func (msg *Call) MessageType() MessageType {
-	return CALL
+	return MessageTypeCall
 }
 
 // [RESULT, CALL.Request|id, Details|dict]
@@ -356,7 +358,7 @@ type Result struct {
 }
 
 func (msg *Result) MessageType() MessageType {
-	return RESULT
+	return MessageTypeResult
 }
 
 // [REGISTER, Request|id, Options|dict, Procedure|uri]
@@ -367,7 +369,7 @@ type Register struct {
 }
 
 func (msg *Register) MessageType() MessageType {
-	return REGISTER
+	return MessageTypeRegister
 }
 
 // [REGISTERED, REGISTER.Request|id, Registration|id]
@@ -377,7 +379,7 @@ type Registered struct {
 }
 
 func (msg *Registered) MessageType() MessageType {
-	return REGISTERED
+	return MessageTypeRegistered
 }
 
 // [UNREGISTER, Request|id, REGISTERED.Registration|id]
@@ -387,7 +389,7 @@ type Unregister struct {
 }
 
 func (msg *Unregister) MessageType() MessageType {
-	return UNREGISTER
+	return MessageTypeUnregister
 }
 
 // [UNREGISTERED, UNREGISTER.Request|id]
@@ -396,7 +398,7 @@ type Unregistered struct {
 }
 
 func (msg *Unregistered) MessageType() MessageType {
-	return UNREGISTERED
+	return MessageTypeUnregistered
 }
 
 // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict]
@@ -411,7 +413,7 @@ type Invocation struct {
 }
 
 func (msg *Invocation) MessageType() MessageType {
-	return INVOCATION
+	return MessageTypeInvocation
 }
 
 // [YIELD, INVOCATION.Request|id, Options|dict]
@@ -425,7 +427,7 @@ type Yield struct {
 }
 
 func (msg *Yield) MessageType() MessageType {
-	return YIELD
+	return MessageTypeYield
 }
 
 // [CANCEL, CALL.Request|id, Options|dict]
@@ -435,7 +437,7 @@ type Cancel struct {
 }
 
 func (msg *Cancel) MessageType() MessageType {
-	return CANCEL
+	return MessageTypeCancel
 }
 
 // [INTERRUPT, INVOCATION.Request|id, Options|dict]
@@ -445,5 +447,5 @@ type Interrupt struct {
 }
 
 func (msg *Interrupt) MessageType() MessageType {
-	return INTERRUPT
+	return MessageTypeInterrupt
 }

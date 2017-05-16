@@ -195,7 +195,7 @@ func (d *defaultDealer) Error(peer *Session, msg *Error) {
 			d.lock.Unlock()
 			// return an error to the caller
 			caller.Send(&Error{
-				Type:        CALL,
+				Type:        MessageTypeCall,
 				Request:     callID,
 				Error:       msg.Error,
 				Details:     make(map[string]interface{}),
