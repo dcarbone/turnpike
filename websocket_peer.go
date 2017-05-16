@@ -20,21 +20,23 @@ type webSocketPeer struct {
 }
 
 func NewWebSocketPeer(serialization Serialization, url string, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
+	var serializer Serializer
+	var payloadType int
+	var protocol string
+
 	switch serialization {
 	case JSON:
-		return newWebSocketPeer(url, jsonWebsocketProtocol,
-			new(JSONSerializer), websocket.TextMessage, tlscfg, dial,
-		)
+		serializer = new(JSONSerializer)
+		payloadType = websocket.TextMessage
+		protocol = jsonWebsocketProtocol
 	case MSGPACK:
-		return newWebSocketPeer(url, msgpackWebsocketProtocol,
-			new(MessagePackSerializer), websocket.BinaryMessage, tlscfg, dial,
-		)
+		serializer = new(MessagePackSerializer)
+		payloadType = websocket.BinaryMessage
+		protocol = msgpackWebsocketProtocol
 	default:
 		return nil, fmt.Errorf("Unsupported serialization: %v", serialization)
 	}
-}
 
-func newWebSocketPeer(url, protocol string, serializer Serializer, payloadType int, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
 	dialer := websocket.Dialer{
 		Subprotocols:    []string{protocol},
 		TLSClientConfig: tlscfg,
@@ -45,12 +47,18 @@ func newWebSocketPeer(url, protocol string, serializer Serializer, payloadType i
 	if err != nil {
 		return nil, err
 	}
+
+	return newWebSocketPeer(serializer, payloadType, conn)
+}
+
+func newWebSocketPeer(serializer Serializer, payloadType int, conn *websocket.Conn) (Peer, error) {
 	ep := &webSocketPeer{
 		conn:        conn,
 		messages:    make(chan Message, 10),
 		serializer:  serializer,
 		payloadType: payloadType,
 	}
+
 	go ep.run()
 
 	return ep, nil

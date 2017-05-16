@@ -134,13 +134,11 @@ func (s *WebSocketServer) handleWebsocket(conn *websocket.Conn) {
 		}
 	}
 
-	peer := webSocketPeer{
-		conn:        conn,
-		serializer:  serializer,
-		messages:    make(chan Message, 10),
-		payloadType: payloadType,
+	peer, err := newWebSocketPeer(serializer, payloadType, conn)
+	if nil != err {
+		logErr(err)
+		return
 	}
-	go peer.run()
 
 	logErr(s.Router.Accept(&peer))
 }
