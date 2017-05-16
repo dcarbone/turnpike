@@ -4,12 +4,12 @@ import (
 	"log"
 	"net/http"
 
-	"gopkg.in/jcelliott/turnpike.v2"
+	"github.com/dcarbone/turnpike"
 )
 
 func main() {
 	turnpike.Debug()
-	s := turnpike.NewBasicWebsocketServer("turnpike.chat.realm")
+	s := turnpike.NewBasicWebSocketServer("turnpike.chat.realm")
 	http.Handle("/", http.FileServer(http.Dir(".")))
 	http.Handle("/ws", s)
 	log.Println("turnpike server starting on port 8000")

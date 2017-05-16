@@ -29,8 +29,8 @@ type protocol struct {
 	serializer  Serializer
 }
 
-// WebsocketServer handles websocket connections.
-type WebsocketServer struct {
+// WebSocketServer handles websocket connections.
+type WebSocketServer struct {
 	Router
 	Upgrader *websocket.Upgrader
 
@@ -42,28 +42,28 @@ type WebsocketServer struct {
 	BinarySerializer Serializer
 }
 
-// NewWebsocketServer creates a new WebsocketServer from a map of realms
-func NewWebsocketServer(realms map[string]Realm) (*WebsocketServer, error) {
-	log.Println("NewWebsocketServer")
+// NewWebSocketServer creates a new WebSocketServer from a map of realms
+func NewWebSocketServer(realms map[string]Realm) (*WebSocketServer, error) {
+	log.Println("NewWebSocketServer")
 	r := NewDefaultRouter()
 	for uri, realm := range realms {
 		if err := r.RegisterRealm(URI(uri), realm); err != nil {
 			return nil, err
 		}
 	}
-	s := newWebsocketServer(r)
+	s := newWebSocketServer(r)
 	return s, nil
 }
 
-// NewBasicWebsocketServer creates a new WebsocketServer with a single basic realm
-func NewBasicWebsocketServer(uri string) *WebsocketServer {
-	log.Println("NewBasicWebsocketServer")
-	s, _ := NewWebsocketServer(map[string]Realm{uri: {}})
+// NewBasicWebSocketServer creates a new WebSocketServer with a single basic realm
+func NewBasicWebSocketServer(uri string) *WebSocketServer {
+	log.Println("NewBasicWebSocketServer")
+	s, _ := NewWebSocketServer(map[string]Realm{uri: {}})
 	return s
 }
 
-func newWebsocketServer(r Router) *WebsocketServer {
-	s := &WebsocketServer{
+func newWebSocketServer(r Router) *WebSocketServer {
+	s := &WebSocketServer{
 		Router:    r,
 		protocols: make(map[string]protocol),
 	}
@@ -74,7 +74,7 @@ func newWebsocketServer(r Router) *WebsocketServer {
 }
 
 // RegisterProtocol registers a serializer that should be used for a given protocol string and payload type.
-func (s *WebsocketServer) RegisterProtocol(proto string, payloadType int, serializer Serializer) error {
+func (s *WebSocketServer) RegisterProtocol(proto string, payloadType int, serializer Serializer) error {
 	log.Println("RegisterProtocol:", proto)
 	if payloadType != websocket.TextMessage && payloadType != websocket.BinaryMessage {
 		return invalidPayload(payloadType)
@@ -88,7 +88,7 @@ func (s *WebsocketServer) RegisterProtocol(proto string, payloadType int, serial
 }
 
 // GetLocalClient returns a client connected to the specified realm
-func (s *WebsocketServer) GetLocalClient(realm string, details map[string]interface{}) (*Client, error) {
+func (s *WebSocketServer) GetLocalClient(realm string, details map[string]interface{}) (*Client, error) {
 	peer, err := s.Router.GetLocalPeer(URI(realm), details)
 	if err != nil {
 		return nil, err
@@ -99,8 +99,8 @@ func (s *WebsocketServer) GetLocalClient(realm string, details map[string]interf
 }
 
 // ServeHTTP handles a new HTTP connection.
-func (s *WebsocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Println("WebsocketServer.ServeHTTP", r.Method, r.RequestURI)
+func (s *WebSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Println("WebSocketServer.ServeHTTP", r.Method, r.RequestURI)
 	// TODO: subprotocol?
 	conn, err := s.Upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -111,7 +111,7 @@ func (s *WebsocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handleWebsocket(conn)
 }
 
-func (s *WebsocketServer) handleWebsocket(conn *websocket.Conn) {
+func (s *WebSocketServer) handleWebsocket(conn *websocket.Conn) {
 	var serializer Serializer
 	var payloadType int
 	if proto, ok := s.protocols[conn.Subprotocol()]; ok {

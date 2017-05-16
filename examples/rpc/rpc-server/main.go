@@ -5,14 +5,14 @@ import (
 	"net/http"
 	"time"
 
-	"gopkg.in/jcelliott/turnpike.v2"
+	"github.com/dcarbone/turnpike"
 )
 
 var client *turnpike.Client
 
 func main() {
 	turnpike.Debug()
-	s := turnpike.NewBasicWebsocketServer("turnpike.examples")
+	s := turnpike.NewBasicWebSocketServer("turnpike.examples")
 	server := &http.Server{
 		Handler: s,
 		Addr:    ":8000",

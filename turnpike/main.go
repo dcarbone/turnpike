@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"time"
 
-	"gopkg.in/jcelliott/turnpike.v2"
+	"github.com/dcarbone/turnpike"
 )
 
 var (
@@ -28,7 +28,7 @@ func main() {
 	if debug {
 		turnpike.Debug()
 	}
-	s := turnpike.NewBasicWebsocketServer(realm)
+	s := turnpike.NewBasicWebSocketServer(realm)
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, os.Interrupt)
 	go func() {
