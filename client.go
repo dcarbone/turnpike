@@ -4,8 +4,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"time"
-	"github.com/gorilla/websocket"
-	"net/http"
 )
 
 var (
@@ -56,36 +54,12 @@ type eventDesc struct {
 // NewWebSocketClient creates a new websocket client connected to the specified
 // `url` and using the specified `serialization`.
 func NewWebSocketClient(serialization SerializationFormat, url string, tlscfg *tls.Config, dial DialFunc) (*Client, error) {
-	var serializer Serializer
-	var payloadType int
-	var protocol WebSocketProtocol
-
-	switch serialization {
-	case SerializationFormatJSON:
-		serializer = new(JSONSerializer)
-		payloadType = websocket.TextMessage
-		protocol = WebSocketProtocolJSON
-	case SerializationFormatMSGPack:
-		serializer = new(MessagePackSerializer)
-		payloadType = websocket.BinaryMessage
-		protocol = WebSocketProtocolMSGPack
-	default:
-		return nil, fmt.Errorf("Unsupported serialization: %v", serialization)
-	}
-
-	dialer := websocket.Dialer{
-		Subprotocols:    []string{string(protocol)},
-		TLSClientConfig: tlscfg,
-		Proxy:           http.ProxyFromEnvironment,
-		NetDial:         dial,
-	}
-
-	conn, _, err := dialer.Dial(url, nil)
-	if err != nil {
+	p, err := NewWebSocketPeer(serialization, url, tlscfg, dial)
+	if nil != err {
 		return nil, err
 	}
 
-	return NewClient(NewWebSocketPeer(serializer, payloadType, conn)), nil
+	return NewClient(p), nil
 }
 
 // NewClient takes a connected Peer and returns a new Client
@@ -99,7 +73,9 @@ func NewClient(p Peer) *Client {
 		acts:           make(chan func()),
 		requestCount:   0,
 	}
+
 	go c.run()
+
 	return c
 }
 

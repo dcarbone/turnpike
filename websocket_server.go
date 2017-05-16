@@ -26,7 +26,7 @@ func (e protocolExists) Error() string {
 	return "This protocol has already been registered: " + string(e)
 }
 
-type protocol struct {
+type webSocketProtocol struct {
 	payloadType int
 	serializer  Serializer
 }
@@ -36,7 +36,7 @@ type WebSocketServer struct {
 	Router
 	Upgrader *websocket.Upgrader
 
-	protocols map[WebSocketProtocol]protocol
+	protocols map[WebSocketProtocol]webSocketProtocol
 
 	// The serializer to use for text frames. Defaults to JSONSerializer.
 	TextSerializer Serializer
@@ -67,7 +67,7 @@ func NewBasicWebSocketServer(uri string) *WebSocketServer {
 func newWebSocketServer(r Router) *WebSocketServer {
 	s := &WebSocketServer{
 		Router:    r,
-		protocols: make(map[WebSocketProtocol]protocol),
+		protocols: make(map[WebSocketProtocol]webSocketProtocol),
 	}
 	s.Upgrader = &websocket.Upgrader{}
 	s.RegisterProtocol(WebSocketProtocolJSON, websocket.TextMessage, new(JSONSerializer))
@@ -84,7 +84,7 @@ func (s *WebSocketServer) RegisterProtocol(protocol WebSocketProtocol, payloadTy
 	if _, ok := s.protocols[protocol]; ok {
 		return protocolExists(protocol)
 	}
-	s.protocols[protocol] = protocol{payloadType, serializer}
+	s.protocols[protocol] = webSocketProtocol{payloadType, serializer}
 	s.Upgrader.Subprotocols = append(s.Upgrader.Subprotocols, string(protocol))
 	return nil
 }
@@ -120,23 +120,11 @@ func (s *WebSocketServer) handleWebSocket(conn *websocket.Conn) {
 		serializer = proto.serializer
 		payloadType = proto.payloadType
 	} else {
-		// TODO: this will not currently ever be hit because
-		//       gorilla/websocket will reject the conncetion
-		//       if the subprotocol isn't registered
-		switch conn.Subprotocol() {
-		case WebSocketProtocolJSON:
-			serializer = new(JSONSerializer)
-			payloadType = websocket.TextMessage
-		case WebSocketProtocolMSGPack:
-			serializer = new(MessagePackSerializer)
-			payloadType = websocket.BinaryMessage
-		default:
-			conn.Close()
-			return
-		}
+		conn.Close()
+		return
 	}
 
-	peer := NewWebSocketPeer(serializer, payloadType, conn)
+	peer := NewPeer(serializer, payloadType, conn)
 
-	logErr(s.Router.Accept(&peer))
+	logErr(s.Router.Accept(peer))
 }

@@ -29,7 +29,7 @@ func TestWSHandshakeJSON(t *testing.T) {
 	port, r, closer := newTestWebsocketServer(t)
 	defer closer.Close()
 
-	client, err := NewWebSocketClient(SerializationFormatJSON, fmt.Sprintf("ws://localhost:%d/", port), nil, nil)
+	client, err := NewWebSocketPeer(SerializationFormatJSON, fmt.Sprintf("ws://localhost:%d/", port), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestWSHandshakeJSON(t *testing.T) {
 	client.Send(&Hello{Realm: testRealm})
 	go r.Accept(client)
 
-	if msg, ok := <-client.Peer.Receive(); !ok {
+	if msg, ok := <-client.Receive(); !ok {
 		t.Fatal("Receive buffer closed")
 	} else if _, ok := msg.(*Welcome); !ok {
 		t.Errorf("Message not Welcome message: %T, %+v", msg, msg)
@@ -48,7 +48,7 @@ func TestWSHandshakeMsgpack(t *testing.T) {
 	port, r, closer := newTestWebsocketServer(t)
 	defer closer.Close()
 
-	client, err := NewWebSocketClient(SerializationFormatMSGPack, fmt.Sprintf("ws://localhost:%d/", port), nil, nil)
+	client, err := NewWebSocketPeer(SerializationFormatMSGPack, fmt.Sprintf("ws://localhost:%d/", port), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestWSHandshakeMsgpack(t *testing.T) {
 	client.Send(&Hello{Realm: testRealm})
 	go r.Accept(client)
 
-	if msg, ok := <-client.Peer.Receive(); !ok {
+	if msg, ok := <-client.Receive(); !ok {
 		t.Fatal("Receive buffer closed")
 	} else if _, ok := msg.(*Welcome); !ok {
 		t.Errorf("Message not Welcome message: %T, %+v", msg, msg)

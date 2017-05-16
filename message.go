@@ -253,7 +253,7 @@ func NewExtensionMessage(mt MessageType) (ExtensionMessage, error) {
 	}
 
 	// create new message
-	msg := reflect.New(reflect.Type(proto)).Interface().(ExtensionMessage)
+	msg := reflect.New(reflect.TypeOf(proto)).Interface().(ExtensionMessage)
 
 	return msg, nil
 }
