@@ -21,6 +21,7 @@ type Peer interface {
 	// Closes the peer connection and any channel returned from Receive().
 	// Multiple calls to Close() will have no effect.
 	Close() error
+	Closed() bool
 
 	// Receive returns a channel of messages coming from the peer.
 	Receive() <-chan Message

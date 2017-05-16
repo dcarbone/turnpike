@@ -1,6 +1,7 @@
 package turnpike
 
 import (
+	"fmt"
 	"math/rand"
 	"time"
 )
@@ -79,4 +80,37 @@ func init() {
 // NewID generates a random WAMP ID.
 func NewID() ID {
 	return ID(rand.Int63n(maxID))
+}
+
+func clientRoles() map[string]map[string]interface{} {
+	return map[string]map[string]interface{}{
+		"publisher":  make(map[string]interface{}),
+		"subscriber": make(map[string]interface{}),
+		"callee":     make(map[string]interface{}),
+		"caller":     make(map[string]interface{}),
+	}
+}
+
+func formatUnexpectedMessage(msg Message, expected MessageType) string {
+	s := fmt.Sprintf("received unexpected %s message while waiting for %s", msg.MessageType(), expected)
+	switch m := msg.(type) {
+	case *Abort:
+		s += ": " + string(m.Reason)
+		s += formatUnknownMap(m.Details)
+		return s
+	case *Goodbye:
+		s += ": " + string(m.Reason)
+		s += formatUnknownMap(m.Details)
+		return s
+	}
+	return s
+}
+
+func formatUnknownMap(m map[string]interface{}) string {
+	s := ""
+	for k, v := range m {
+		// TODO: reflection to recursively check map
+		s += fmt.Sprintf(" %s=%v", k, v)
+	}
+	return s
 }

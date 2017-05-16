@@ -26,6 +26,7 @@ type webSocketPeer struct {
 	out chan Message
 }
 
+// TODO: Hate this.  Change.
 func NewWebSocketPeer(serialization SerializationFormat, url string, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
 	var serializer Serializer
 	var payloadType int
@@ -75,7 +76,6 @@ func NewPeer(serializer Serializer, payloadType int, conn *websocket.Conn) Peer 
 	return ep
 }
 
-// TODO: make this just add the message to a channel so we don't block
 func (ep *webSocketPeer) Send(msg Message) error {
 	ep.closedLock.RLock()
 	defer ep.closedLock.RUnlock()
@@ -88,9 +88,11 @@ func (ep *webSocketPeer) Send(msg Message) error {
 
 	return nil
 }
+
 func (ep *webSocketPeer) Receive() <-chan Message {
 	return ep.in
 }
+
 func (ep *webSocketPeer) Close() error {
 	ep.closedLock.Lock()
 	defer ep.closedLock.Unlock()
@@ -113,6 +115,12 @@ func (ep *webSocketPeer) Close() error {
 	ep.closeIOChans()
 
 	return ep.conn.Close()
+}
+
+func (ep *webSocketPeer) Closed() bool {
+	ep.closedLock.RLock()
+	defer ep.closedLock.RUnlock()
+	return ep.closed
 }
 
 func (ep *webSocketPeer) closeIOChans() {

@@ -46,26 +46,27 @@ const (
 	MessageTypeGoodbye      MessageType = 6
 	MessageTypeError        MessageType = 8
 
-	MessageTypePublish   MessageType = 16 //	Tx 	Rx
-	MessageTypePublished MessageType = 17 //	Rx 	Tx
+	MessageTypePublish   MessageType = 16
+	MessageTypePublished MessageType = 17
 
-	MessageTypeSubscribe    MessageType = 32 //	Rx 	Tx
-	MessageTypeSubscribed   MessageType = 33 //	Tx 	Rx
-	MessageTypeUnsubscribe  MessageType = 34 //	Rx 	Tx
-	MessageTypeUnsubscribed MessageType = 35 //	Tx 	Rx
-	MessageTypeEvent        MessageType = 36 //	Tx 	Rx
+	MessageTypeSubscribe    MessageType = 32
+	MessageTypeSubscribed   MessageType = 33
+	MessageTypeUnsubscribe  MessageType = 34
+	MessageTypeUnsubscribed MessageType = 35
 
-	MessageTypeCall   MessageType = 48 //	Tx 	Rx
-	MessageTypeCancel MessageType = 49 //	Tx 	Rx
-	MessageTypeResult MessageType = 50 //	Rx 	Tx
+	MessageTypeEvent MessageType = 36
 
-	MessageTypeRegister     MessageType = 64 //	Rx 	Tx
-	MessageTypeRegistered   MessageType = 65 //	Tx 	Rx
-	MessageTypeUnregister   MessageType = 66 //	Rx 	Tx
-	MessageTypeUnregistered MessageType = 67 //	Tx 	Rx
-	MessageTypeInvocation   MessageType = 68 //	Tx 	Rx
-	MessageTypeInterrupt    MessageType = 69 //	Tx 	Rx
-	MessageTypeYield        MessageType = 70 //	Rx 	Tx
+	MessageTypeCall   MessageType = 48
+	MessageTypeCancel MessageType = 49
+	MessageTypeResult MessageType = 50
+
+	MessageTypeRegister     MessageType = 64
+	MessageTypeRegistered   MessageType = 65
+	MessageTypeUnregister   MessageType = 66
+	MessageTypeUnregistered MessageType = 67
+	MessageTypeInvocation   MessageType = 68
+	MessageTypeInterrupt    MessageType = 69
+	MessageTypeYield        MessageType = 70
 
 	MessageTypeExtensionMin MessageType = 256
 	MessageTypeExtensionMax MessageType = 1023

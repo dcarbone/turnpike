@@ -41,6 +41,10 @@ type localPeer struct {
 	incoming <-chan Message
 }
 
+func (s *localPeer) Closed() bool {
+	return false
+}
+
 func (s *localPeer) Receive() <-chan Message {
 	return s.incoming
 }

@@ -2,6 +2,7 @@ package turnpike
 
 import (
 	"fmt"
+	"sync"
 	"time"
 )
 
@@ -14,17 +15,22 @@ const (
 // Clients that have connected to a WAMP router are joined to a realm and all
 // message delivery is handled by the realm.
 type Realm struct {
-	_   string
-	URI URI
 	Broker
 	Dealer
 	Authorizer
 	Interceptor
+
+	URI              URI
 	CRAuthenticators map[string]CRAuthenticator
 	Authenticators   map[string]Authenticator
-	// DefaultAuth      func(details map[string]interface{}) (map[string]interface{}, error)
-	AuthTimeout time.Duration
-	clients     map[ID]*Session
+	AuthTimeout      time.Duration
+
+	sessions     map[ID]*Session
+	sessionsLock sync.RWMutex
+
+	closed     bool
+	closedLock sync.RWMutex
+
 	localClient
 	acts chan func()
 }
@@ -33,48 +39,13 @@ type localClient struct {
 	*Client
 }
 
-func (r *Realm) getPeer(details map[string]interface{}) (Peer, error) {
-	peerA, peerB := localPipe()
-	if details == nil {
-		details = make(map[string]interface{})
-	}
-	sess := Session{Peer: peerA, Id: NewID(), Details: details, kill: make(chan URI, 1)}
-	go r.handleSession(&sess)
-	log.Println("Established internal session:", sess)
-	return peerB, nil
-}
-
-// Close disconnects all clients after sending a goodbye message
-func (r Realm) Close() {
-	r.acts <- func() {
-		for _, client := range r.clients {
-			client.kill <- ErrSystemShutdown
-		}
-	}
-
-	var (
-		sync     = make(chan struct{})
-		nclients int
-	)
-	for {
-		r.acts <- func() {
-			nclients = len(r.clients)
-			sync <- struct{}{}
-		}
-		<-sync
-		if nclients == 0 {
-			break
-		}
-	}
-
-	close(r.acts)
-}
-
 func (r *Realm) init() {
-	r.clients = make(map[ID]*Session)
+	r.sessions = make(map[ID]*Session)
 	r.acts = make(chan func())
 	p, _ := r.getPeer(nil)
+
 	r.localClient.Client = NewClient(p)
+
 	if r.Broker == nil {
 		r.Broker = NewDefaultBroker()
 	}
@@ -90,8 +61,41 @@ func (r *Realm) init() {
 	if r.AuthTimeout == 0 {
 		r.AuthTimeout = defaultAuthTimeout
 	}
+
 	go r.localClient.Receive()
 	go r.run()
+}
+
+func (r *Realm) Closed() bool {
+	r.closedLock.RLock()
+	defer r.closedLock.RUnlock()
+	return r.closed
+}
+
+// Close disconnects all clients after sending a goodbye message
+func (r Realm) Close() {
+	r.acts <- func() {
+		for _, client := range r.sessions {
+			client.kill <- ErrSystemShutdown
+		}
+	}
+
+	var (
+		sync     = make(chan struct{})
+		nclients int
+	)
+	for {
+		r.acts <- func() {
+			nclients = len(r.sessions)
+			sync <- struct{}{}
+		}
+		<-sync
+		if nclients == 0 {
+			break
+		}
+	}
+
+	close(r.acts)
 }
 
 func (r *Realm) run() {
@@ -115,14 +119,14 @@ func (l *localClient) onLeave(session ID) {
 func (r *Realm) handleSession(sess *Session) {
 	sync := make(chan struct{})
 	r.acts <- func() {
-		r.clients[sess.Id] = sess
+		r.sessions[sess.Id] = sess
 		r.onJoin(sess.Details)
 		sync <- struct{}{}
 	}
 	<-sync
 	defer func() {
 		r.acts <- func() {
-			delete(r.clients, sess.Id)
+			delete(r.sessions, sess.Id)
 			r.Dealer.RemoveSession(sess)
 			r.Broker.RemoveSession(sess)
 			r.onLeave(sess.Id)
@@ -300,6 +304,17 @@ func (r Realm) checkResponse(chal *Challenge, auth *Authenticate) (*Welcome, err
 	}
 }
 
+func (r *Realm) getPeer(details map[string]interface{}) (Peer, error) {
+	peerA, peerB := localPipe()
+	if details == nil {
+		details = make(map[string]interface{})
+	}
+	sess := Session{Peer: peerA, Id: NewID(), Details: details, kill: make(chan URI, 1)}
+	go r.handleSession(&sess)
+	log.Println("Established internal session:", sess)
+	return peerB, nil
+}
+
 func addAuthMethod(details map[string]interface{}, method string) map[string]interface{} {
 	if details == nil {
 		details = make(map[string]interface{})
@@ -307,14 +322,3 @@ func addAuthMethod(details map[string]interface{}, method string) map[string]int
 	details["authmethod"] = method
 	return details
 }
-
-// r := Realm{
-// 	Authenticators: map[string]turnpike.Authenticator{
-// 		"wampcra": turnpike.NewCRAAuthenticatorFactoryFactory(mySecret),
-// 		"ticket": turnpike.NewTicketAuthenticator(myTicket),
-// 		"asdfasdf": myAsdfAuthenticator,
-// 	},
-// 	BasicAuthenticators: map[string]turnpike.BasicAuthenticator{
-// 		"anonymous": nil,
-// 	},
-// }

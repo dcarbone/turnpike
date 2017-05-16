@@ -13,6 +13,7 @@ type TestPeer struct {
 func (s *TestPeer) Send(msg Message) error  { s.received = msg; return nil }
 func (s *TestPeer) Receive() <-chan Message { return nil }
 func (s *TestPeer) Close() error            { return nil }
+func (s *TestPeer) Closed() bool            { return false }
 
 func TestSubscribe(t *testing.T) {
 	Convey("Subscribing to a topic", t, func() {
