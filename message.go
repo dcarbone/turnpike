@@ -1,11 +1,41 @@
 package turnpike
 
-// Message is a generic container for a WAMP message.
-type Message interface {
-	MessageType() MessageType
-}
+import (
+	"fmt"
+	"reflect"
+	"sync"
+)
 
-type MessageType int
+type (
+	// Message is a generic container for a WAMP message.
+	// URIs are dot-separated identifiers, where each component *should* only contain letters, numbers or underscores.
+	//
+	// See the documentation for specifics: https://github.com/wamp-proto/wamp-proto/blob/master/rfc/text/basic/bp_identifiers.md#uris-uris
+	URI string
+
+	// An ID is a unique, non-negative number. Different uses may have additional restrictions.
+	ID uint64
+
+	// constants sourced from: http://wamp-proto.org/static/rfc/draft-oberstet-hybi-crossbar-wamp.html#rfc.section.6.5
+	MessageType int
+
+	// Message is a generic container for a WAMP message.
+	Message interface {
+		MessageType() MessageType
+	}
+
+	// ExtensionMessage is a generic container for WAMP message extensions
+	ExtensionMessage interface {
+		Message
+
+		MessageTypeName() string
+	}
+)
+
+var (
+	extensions     = map[MessageType]ExtensionMessage{}
+	extensionsLock = sync.RWMutex{}
+)
 
 const (
 	MessageTypeHello        MessageType = 1
@@ -37,7 +67,8 @@ const (
 	MessageTypeInterrupt    MessageType = 69 //	Tx 	Rx
 	MessageTypeYield        MessageType = 70 //	Rx 	Tx
 
-
+	MessageTypeExtensionMin MessageType = 256
+	MessageTypeExtensionMax MessageType = 1023
 )
 
 func (mt MessageType) New() Message {
@@ -95,8 +126,11 @@ func (mt MessageType) New() Message {
 	case MessageTypeYield:
 		return new(Yield)
 	default:
-		// TODO: allow custom message types?
-		return nil
+		msg, err := NewExtensionMessage(mt)
+		if nil != err {
+			panic(err.Error())
+		}
+		return msg
 	}
 }
 
@@ -154,19 +188,75 @@ func (mt MessageType) String() string {
 		return "INTERRUPT"
 	case MessageTypeYield:
 		return "YIELD"
+
 	default:
-		// TODO: allow custom message types?
-		panic("Invalid message type")
+		msg, err := NewExtensionMessage(mt)
+		if nil != err {
+			panic(err.Error())
+		}
+		return msg.MessageTypeName()
 	}
 }
 
-// URIs are dot-separated identifiers, where each component *should* only contain letters, numbers or underscores.
-//
-// See the documentation for specifics: https://github.com/wamp-proto/wamp-proto/blob/master/rfc/text/basic/bp_identifiers.md#uris-uris
-type URI string
+// RegisterExtensionMessage allows you to specify a custom message type for use within your implementation.
+func RegisterExtensionMessage(mt MessageType, proto ExtensionMessage) error {
 
-// An ID is a unique, non-negative number. Different uses may have additional restrictions.
-type ID uint64
+	// TODO: This could probably be made MUCH simpler...
+
+	var protoType reflect.Type
+	var protoKind reflect.Kind
+
+	// validate type value
+	if mt < MessageTypeExtensionMin || mt > MessageTypeExtensionMax {
+		return fmt.Errorf(
+			"Extension Messages must have a Type value in range [%d...%d], %d provided",
+			MessageTypeExtensionMin,
+			MessageTypeExtensionMax,
+			mt)
+	}
+
+	// get type
+	protoType = reflect.TypeOf(proto)
+
+	// check for pointer
+	if protoKind == reflect.Ptr {
+		protoType = protoType.Elem()
+	}
+
+	// get kind
+	protoKind = protoType.Kind()
+
+	// only allow structs
+	if protoType.Kind() != reflect.Struct {
+		return fmt.Errorf("Message implementation must be struct, %s provided", protoType)
+	}
+
+	// lock map
+	extensionsLock.Lock()
+	defer extensionsLock.Unlock()
+
+	// create empty message
+	extensions[mt] = reflect.New(protoType).Interface().(ExtensionMessage)
+
+	return nil
+}
+
+// NewExtensionMessage will attempt to construct a new instance of an extension message type
+func NewExtensionMessage(mt MessageType) (ExtensionMessage, error) {
+	extensionsLock.RLock()
+	defer extensionsLock.RUnlock()
+
+	// has extension been defined?
+	proto, ok := extensions[mt]
+	if !ok {
+		return nil, fmt.Errorf("\"%d\" is not a registered message extension type", mt)
+	}
+
+	// create new message
+	msg := reflect.New(reflect.Type(proto)).Interface().(ExtensionMessage)
+
+	return msg, nil
+}
 
 // [HELLO, Realm|uri, Details|dict]
 type Hello struct {
