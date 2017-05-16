@@ -1,20 +1,16 @@
 package turnpike
 
 import (
-	"crypto/tls"
-	"fmt"
-	"net/http"
-	"sync"
-	"time"
-
 	"context"
 	"errors"
+	"fmt"
 	"github.com/gorilla/websocket"
+	"sync"
+	"time"
 )
 
 type webSocketPeer struct {
-	ctx       context.Context
-	ctxCancel context.CancelFunc
+	ctx context.Context
 
 	closedLock sync.RWMutex
 	closed     bool
@@ -28,35 +24,9 @@ type webSocketPeer struct {
 	payloadType int
 }
 
-func NewWebSocketPeer(ctx context.Context, serialization Serialization, url string, tlscfg *tls.Config, dial DialFunc) (Peer, error) {
-	switch serialization {
-	case JSON:
-		return newWebSocketPeer(ctx, url, jsonWebsocketProtocol,
-			new(JSONSerializer), websocket.TextMessage, tlscfg, dial,
-		)
-	case MSGPACK:
-		return newWebSocketPeer(ctx, url, msgpackWebsocketProtocol,
-			new(MessagePackSerializer), websocket.BinaryMessage, tlscfg, dial,
-		)
-	default:
-		return nil, fmt.Errorf("Unsupported serialization: %v", serialization)
-	}
-}
-
-func newWebSocketPeer(ctx context.Context, url, protocol string, serializer Serializer, payloadType int, tlsCfg *tls.Config, dial DialFunc) (Peer, error) {
-	dialer := websocket.Dialer{
-		Subprotocols:    []string{protocol},
-		TLSClientConfig: tlsCfg,
-		Proxy:           http.ProxyFromEnvironment,
-		NetDial:         dial,
-	}
-
-	conn, _, err := dialer.Dial(url, nil)
-	if err != nil {
-		return nil, err
-	}
-
+func NewWebSocketPeer(serializer Serializer, payloadType int, conn *websocket.Conn) Peer {
 	ep := &webSocketPeer{
+		ctx:              context.Background(),
 		conn:             conn,
 		incomingMessages: make(chan Message, 10),
 		outgoingMessages: make(chan Message, 10),
@@ -64,11 +34,10 @@ func newWebSocketPeer(ctx context.Context, url, protocol string, serializer Seri
 		payloadType:      payloadType,
 	}
 
-	ep.ctx, ep.ctxCancel = context.WithCancel(ctx)
+	go ep.readLoop()
+	go ep.writeLoop()
 
-	go ep.run()
-
-	return ep, nil
+	return ep
 }
 
 func (ep *webSocketPeer) Send(msg Message) error {
@@ -102,10 +71,11 @@ func (ep *webSocketPeer) Receive(t time.Duration) (Message, error) {
 		t = 1 * time.Second
 	}
 
-	ctx, _ := context.WithDeadline(ep.ctx, time.Now().Add(t))
+	ctx, cancel := context.WithDeadline(ep.ctx, time.Now().Add(t))
 
 	select {
 	case msg, ok := <-ep.incomingMessages:
+		cancel()
 		if !ok {
 			ep.Close()
 			return nil, errors.New("session lost")
@@ -118,64 +88,88 @@ func (ep *webSocketPeer) Receive(t time.Duration) (Message, error) {
 }
 
 func (ep *webSocketPeer) Close() error {
-	ep.closedLock.RLock()
-	defer ep.closedLock.RUnlock()
+	ep.closedLock.Lock()
+	defer ep.closedLock.Unlock()
 
 	// has peer already been closed?
 	if ep.closed {
 		return errors.New("Peer is already closed.")
 	}
 
-	// cancel our context
-	ep.ctxCancel()
+	ep.closed = true
 
-	return nil
-}
+	// construct close message
+	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye")
 
-func (ep *webSocketPeer) run() {
-	for {
-		select {
-		case <-ep.ctx.Done():
-			// close us
-			ep.closedLock.Lock()
-			ep.closed = true
-			ep.closedLock.Unlock()
-
-			// close our channels
-			close(ep.outgoingMessages)
-			close(ep.incomingMessages)
-
-			// construct close message
-			closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye")
-
-			// send with 1 second timeout
-			err := ep.conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(1*time.Second))
-			if err != nil {
-				log.Println("error sending close message:", err)
-			}
-
-			// attempt to close connection
-			err = ep.conn.Close()
-			if nil != err {
-				log.Println("error closing connection: %s", err)
-			}
-
-			return
-
-		case msg := <-ep.outgoingMessages:
-			// attempt to serialize outgoing message
-			if b, err := ep.serializer.Serialize(msg); nil == err {
-				// attempt to send
-				err = ep.conn.WriteMessage(ep.payloadType, b)
-				if nil != err {
-					// TODO: handle error
-					log.Printf("Unable to write message \"%+v\": %s", msg, err)
-				}
-			} else {
-				// TODO: Handle error?
-				log.Printf("Unable to serialize message \"%+v\": %s", msg, err)
-			}
-		}
+	// send with 1 second timeout
+	err := ep.conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(1*time.Second))
+	if err != nil {
+		log.Println("error sending close message:", err)
 	}
 
+	ep.closeIOChans()
+	return ep.conn.Close()
+}
+
+func (ep *webSocketPeer) closeIOChans() {
+	// close our channels
+	close(ep.outgoingMessages)
+	close(ep.incomingMessages)
+}
+
+func (ep *webSocketPeer) readLoop() {
+	for {
+		// attempt to read message from connection
+		msgType, b, err := ep.conn.ReadMessage()
+		if nil != err {
+			// unable to read message, terminate peer
+			ep.closedLock.RLock()
+			ep.closeIOChans()
+			if ep.closed {
+				log.Println("peer connection closed")
+			} else {
+				log.Println("error reading from peer:", err)
+				ep.conn.Close()
+			}
+			ep.closedLock.RUnlock()
+			return
+		}
+
+		// if we got a close..
+		if websocket.CloseMessage == msgType {
+			// terminate peer
+			ep.closedLock.Lock()
+			ep.closed = true
+			ep.closeIOChans()
+			ep.conn.Close()
+			ep.closedLock.Unlock()
+			return
+		}
+
+		// attempt to unmarshal into something and append to incoming message queue
+		msg, err := ep.serializer.Deserialize(b)
+		if nil != err {
+			log.Printf("error deserializing peer message: %s", err)
+		} else {
+			ep.incomingMessages <- msg
+		}
+	}
+}
+
+func (ep *webSocketPeer) writeLoop() {
+	// loop so long as channel remains open
+	for msg := range ep.outgoingMessages {
+		// attempt to marshal
+		if b, err := ep.serializer.Serialize(msg); nil == err {
+			// attempt to send
+			err = ep.conn.WriteMessage(ep.payloadType, b)
+			if nil != err {
+				// TODO: handle error
+				log.Printf("Unable to write message \"%+v\": %s", msg, err)
+			}
+		} else {
+			// TODO: Handle error?
+			log.Printf("Unable to serialize message \"%+v\": %s", msg, err)
+		}
+	}
 }

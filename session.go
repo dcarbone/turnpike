@@ -2,7 +2,10 @@ package turnpike
 
 import (
 	"fmt"
+	"time"
 )
+
+type SessionCallbackFunc func(*Session, string)
 
 // Session represents an active WAMP session
 type Session struct {
@@ -15,6 +18,25 @@ type Session struct {
 
 func (s Session) String() string {
 	return fmt.Sprintf("%d", s.Id)
+}
+
+type localPeer struct {
+	outgoing chan<- Message
+	incoming <-chan Message
+}
+
+func (s *localPeer) Receive(t time.Duration) (Message, error) {
+	return <-s.incoming, nil
+}
+
+func (s *localPeer) Send(msg Message) error {
+	s.outgoing <- msg
+	return nil
+}
+
+func (s *localPeer) Close() error {
+	close(s.outgoing)
+	return nil
 }
 
 // localPipe creates two linked sessions. Messages sent to one will
@@ -34,23 +56,4 @@ func localPipe() (*localPeer, *localPeer) {
 	}
 
 	return a, b
-}
-
-type localPeer struct {
-	outgoing chan<- Message
-	incoming <-chan Message
-}
-
-func (s *localPeer) Receive() <-chan Message {
-	return s.incoming
-}
-
-func (s *localPeer) Send(msg Message) error {
-	s.outgoing <- msg
-	return nil
-}
-
-func (s *localPeer) Close() error {
-	close(s.outgoing)
-	return nil
 }
