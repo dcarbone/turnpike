@@ -46,12 +46,12 @@ func main() {
 	}
 
 	messages := make(chan message)
-	if err := c.Subscribe("chat", nil, func(args []interface{}, kwargs map[string]interface{}) {
-		if len(args) == 2 {
-			if from, ok := args[0].(string); !ok {
-				log.Println("First argument not a string:", args[0])
-			} else if msg, ok := args[1].(string); !ok {
-				log.Println("Second argument not a string:", args[1])
+	if err := c.Subscribe("chat", nil, func(e *turnpike.Event) {
+		if len(e.Arguments) == 2 {
+			if from, ok := e.Arguments[0].(string); !ok {
+				log.Println("First argument not a string:", e.Arguments[0])
+			} else if msg, ok := e.Arguments[1].(string); !ok {
+				log.Println("Second argument not a string:", e.Arguments[1])
 			} else {
 				log.Printf("%s: %s", from, msg)
 				messages <- message{From: from, Message: msg}

@@ -19,15 +19,15 @@ func main() {
 	log.Println("joined realm")
 	c.ReceiveDone = make(chan bool)
 
-	onJoin := func(args []interface{}, kwargs map[string]interface{}) {
-		log.Println("session joined:", args[0])
+	onJoin := func(e *turnpike.Event) {
+		log.Println("session joined:", e.Arguments[0])
 	}
 	if err := c.Subscribe("wamp.session.on_join", nil, onJoin); err != nil {
 		log.Fatalln("Error subscribing to channel:", err)
 	}
 
-	onLeave := func(args []interface{}, kwargs map[string]interface{}) {
-		log.Println("session left:", args[0])
+	onLeave := func(e *turnpike.Event) {
+		log.Println("session left:", e.Arguments[0])
 	}
 	if err := c.Subscribe("wamp.session.on_leave", nil, onLeave); err != nil {
 		log.Fatalln("Error subscribing to channel:", err)

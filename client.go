@@ -33,10 +33,10 @@ var (
 type (
 	// AuthFunc takes the HELLO details and CHALLENGE details and returns the
 	// signature string and a details map
-	AuthFunc func(map[string]interface{}, map[string]interface{}) (string, map[string]interface{}, error)
+	AuthFunc func(helloDetails, challengeDetails map[string]interface{}) (string, map[string]interface{}, error)
 
 	// EventHandler handles a publish event.
-	EventHandler func(args []interface{}, kwargs map[string]interface{})
+	EventHandler func(*Event)
 
 	// MethodHandler is an RPC endpoint.
 	MethodHandler func(args []interface{}, kwargs map[string]interface{}, details map[string]interface{}) (result *CallResult)
@@ -58,11 +58,11 @@ type (
 
 		ctx context.Context
 
+		subscriptions     map[ID]*subscription
+		subscriptionsLock sync.RWMutex
+
 		listeners     map[ID]chan Message
 		listenersLock sync.RWMutex
-
-		events     map[ID]*eventDescription
-		eventsLock sync.RWMutex
 
 		procedures     map[ID]*procedureDescription
 		proceduresLock sync.RWMutex
@@ -73,7 +73,7 @@ type (
 		handler MethodHandler
 	}
 
-	eventDescription struct {
+	subscription struct {
 		topic   string
 		handler EventHandler
 	}
@@ -98,8 +98,9 @@ func NewClient(p Peer) *Client {
 
 		ctx: context.Background(),
 
+		subscriptions: make(map[ID]*subscription),
+
 		listeners:  make(map[ID]chan Message),
-		events:     make(map[ID]*eventDescription),
 		procedures: make(map[ID]*procedureDescription),
 	}
 
@@ -253,7 +254,13 @@ func (c *Client) Receive() {
 		switch msg := msg.(type) {
 
 		case *Event:
-			c.handleEvent(msg)
+			c.subscriptionsLock.RLock()
+			if s, ok := c.subscriptions[msg.Subscription]; ok {
+				go s.handler(msg)
+			} else {
+				log.Printf("un-handled event: %v", msg)
+			}
+			c.subscriptionsLock.RUnlock()
 
 		case *Invocation:
 			c.handleInvocation(msg)
@@ -318,17 +325,28 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Even
 
 	// wait to receive SUBSCRIBED message
 	msg, err := c.waitOnListener(id)
-
 	if err != nil {
 		return err
-	} else if e, ok := msg.(*Error); ok {
-		return fmt.Errorf("error subscribing to topic '%v': %v", topic, e.Error)
-	} else if subscribed, ok := msg.(*Subscribed); !ok {
-		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeSubscribed))
-	} else {
-		// register the event handler with this subscription
-		c.registerEventHandler(subscribed.Subscription, &eventDescription{topic, fn})
 	}
+
+	// test for error
+	e, ok := msg.(*Error)
+	if ok {
+		return fmt.Errorf("error subscribing to topic '%v': %v", topic, e.Error)
+	}
+
+	// ensure we got a subscribed message
+	subscribed, ok := msg.(*Subscribed)
+	if !ok {
+		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeSubscribed))
+	}
+
+	// add subscription to map
+	c.subscriptionsLock.Lock()
+	defer c.subscriptionsLock.Unlock()
+
+	c.subscriptions[subscribed.Subscription] = &subscription{topic, fn}
+
 	return nil
 }
 
@@ -338,30 +356,36 @@ func (c *Client) Unsubscribe(topic string) error {
 		return errors.New("Client is closed")
 	}
 
-	c.eventsLock.RLock()
-
 	var subscriptionID ID
 
-	for id, desc := range c.events {
-		if desc.topic == topic {
+	// attempt to locate subscription ID...
+	c.subscriptionsLock.RLock()
+	for id, sub := range c.subscriptions {
+		if sub.topic == topic {
 			subscriptionID = id
 			break
 		}
 	}
-
-	c.eventsLock.RUnlock()
+	c.subscriptionsLock.RUnlock()
 
 	if 0 == subscriptionID {
 		return fmt.Errorf("Event %s is not registered with this client.", topic)
 	}
 
-	// queue up event for deletion
-	defer c.deleteEventHandler(subscriptionID)
-
 	id := NewID()
 
 	c.registerListener(id)
-	defer c.deleteListener(id)
+
+	// queue up on-return stuff...
+	defer func(c *Client) {
+		// remove listener...
+		c.deleteListener(id)
+
+		// remove subscription from map
+		c.subscriptionsLock.Lock()
+		delete(c.subscriptions, subscriptionID)
+		c.subscriptionsLock.Unlock()
+	}(c)
 
 	sub := &Unsubscribe{
 		Request:      id,
@@ -375,12 +399,19 @@ func (c *Client) Unsubscribe(topic string) error {
 
 	// wait to receive UNSUBSCRIBED message
 	msg, err := c.waitOnListener(id)
-
 	if err != nil {
 		return err
-	} else if e, ok := msg.(*Error); ok {
+	}
+
+	// test for error
+	e, ok := msg.(*Error)
+	if ok {
 		return fmt.Errorf("error unsubscribing to topic '%v': %v", topic, e.Error)
-	} else if _, ok := msg.(*Unsubscribed); !ok {
+	}
+
+	// test for unknown message
+	_, ok = msg.(*Unsubscribed)
+	if !ok {
 		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeUnsubscribed))
 	}
 
@@ -396,6 +427,7 @@ func (c *Client) Publish(topic string, options map[string]interface{}, args []in
 	if options == nil {
 		options = make(map[string]interface{})
 	}
+
 	return c.Send(&Publish{
 		Request:     NewID(),
 		Options:     options,
@@ -587,29 +619,6 @@ func (c *Client) waitOnListener(id ID) (msg Message, err error) {
 	}
 
 	return
-}
-
-func (c *Client) registerEventHandler(id ID, desc *eventDescription) {
-	c.eventsLock.Lock()
-	defer c.eventsLock.Unlock()
-	c.events[id] = desc
-}
-
-func (c *Client) deleteEventHandler(id ID) {
-	c.eventsLock.Lock()
-	defer c.eventsLock.Unlock()
-	delete(c.events, id)
-}
-
-func (c *Client) handleEvent(msg *Event) {
-	c.eventsLock.RLock()
-	defer c.eventsLock.RUnlock()
-
-	if event, ok := c.events[msg.Subscription]; ok {
-		go event.handler(msg.Arguments, msg.ArgumentsKw)
-	} else {
-		log.Println("no handler registered for subscription:", msg.Subscription)
-	}
 }
 
 func (c *Client) notifyListener(msg Message, requestID ID) {
