@@ -73,7 +73,7 @@ func (r *Realm) Closed() bool {
 }
 
 // Close disconnects all clients after sending a goodbye message
-func (r Realm) Close() {
+func (r *Realm) Close() {
 	r.acts <- func() {
 		for _, client := range r.sessions {
 			client.kill <- ErrSystemShutdown
@@ -81,15 +81,15 @@ func (r Realm) Close() {
 	}
 
 	var (
-		sync     = make(chan struct{})
+		s        = make(chan struct{})
 		nclients int
 	)
 	for {
 		r.acts <- func() {
 			nclients = len(r.sessions)
-			sync <- struct{}{}
+			s <- struct{}{}
 		}
-		<-sync
+		<-s
 		if nclients == 0 {
 			break
 		}
@@ -117,13 +117,13 @@ func (l *localClient) onLeave(session ID) {
 }
 
 func (r *Realm) handleSession(sess *Session) {
-	sync := make(chan struct{})
+	s := make(chan struct{})
 	r.acts <- func() {
 		r.sessions[sess.Id] = sess
 		r.onJoin(sess.Details)
-		sync <- struct{}{}
+		s <- struct{}{}
 	}
-	<-sync
+	<-s
 	defer func() {
 		r.acts <- func() {
 			delete(r.sessions, sess.Id)
@@ -251,7 +251,7 @@ func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcom
 
 // Authenticate either authenticates a client or returns a challenge message if
 // challenge/response authentication is to be used.
-func (r Realm) authenticate(details map[string]interface{}) (Message, error) {
+func (r *Realm) authenticate(details map[string]interface{}) (Message, error) {
 	log.Println("details:", details)
 	if len(r.Authenticators) == 0 && len(r.CRAuthenticators) == 0 {
 		return &Welcome{}, nil
@@ -292,7 +292,7 @@ func (r Realm) authenticate(details map[string]interface{}) (Message, error) {
 }
 
 // checkResponse determines whether the response to the challenge is sufficient to gain access to the Realm.
-func (r Realm) checkResponse(chal *Challenge, auth *Authenticate) (*Welcome, error) {
+func (r *Realm) checkResponse(chal *Challenge, auth *Authenticate) (*Welcome, error) {
 	authenticator, ok := r.CRAuthenticators[chal.AuthMethod]
 	if !ok {
 		return nil, fmt.Errorf("authentication method has been removed")

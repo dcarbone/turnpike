@@ -36,7 +36,7 @@ func (e AuthenticationError) Error() string {
 type Router interface {
 	Accept(Peer) error
 	Close() error
-	RegisterRealm(URI, Realm) error
+	RegisterRealm(URI, *Realm) error
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
 	AddSessionOpenCallback(func(*Session, string))
 	AddSessionCloseCallback(func(*Session, string))
@@ -44,7 +44,7 @@ type Router interface {
 
 // DefaultRouter is the default WAMP router implementation.
 type defaultRouter struct {
-	realms                map[URI]Realm
+	realms                map[URI]*Realm
 	closing               bool
 	closeLock             sync.Mutex
 	sessionOpenCallbacks  []func(*Session, string)
@@ -54,7 +54,7 @@ type defaultRouter struct {
 // NewDefaultRouter creates a very basic WAMP router.
 func NewDefaultRouter() Router {
 	return &defaultRouter{
-		realms:                make(map[URI]Realm),
+		realms:                make(map[URI]*Realm),
 		sessionOpenCallbacks:  []func(*Session, string){},
 		sessionCloseCallbacks: []func(*Session, string){},
 	}
@@ -82,7 +82,7 @@ func (r *defaultRouter) Close() error {
 	return nil
 }
 
-func (r *defaultRouter) RegisterRealm(uri URI, realm Realm) error {
+func (r *defaultRouter) RegisterRealm(uri URI, realm *Realm) error {
 	if _, ok := r.realms[uri]; ok {
 		return RealmExistsError(uri)
 	}

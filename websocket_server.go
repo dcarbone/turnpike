@@ -45,7 +45,7 @@ type WebSocketServer struct {
 }
 
 // NewWebSocketServer creates a new WebSocketServer from a map of realms
-func NewWebSocketServer(realms map[string]Realm) (*WebSocketServer, error) {
+func NewWebSocketServer(realms map[string]*Realm) (*WebSocketServer, error) {
 	log.Println("NewWebSocketServer")
 	r := NewDefaultRouter()
 	for uri, realm := range realms {
@@ -60,7 +60,7 @@ func NewWebSocketServer(realms map[string]Realm) (*WebSocketServer, error) {
 // NewBasicWebSocketServer creates a new WebSocketServer with a single basic realm
 func NewBasicWebSocketServer(uri string) *WebSocketServer {
 	log.Println("NewBasicWebSocketServer")
-	s, _ := NewWebSocketServer(map[string]Realm{uri: {}})
+	s, _ := NewWebSocketServer(map[string]*Realm{uri: {}})
 	return s
 }
 

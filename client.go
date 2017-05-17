@@ -596,7 +596,7 @@ func (c *Client) deleteListener(id ID) {
 	delete(c.listeners, id)
 }
 
-func (c *Client) waitOnListener(id ID) (msg Message, err error) {
+func (c *Client) waitOnListener(id ID) (Message, error) {
 	c.listenersLock.RLock()
 	defer c.listenersLock.RUnlock()
 
@@ -608,15 +608,14 @@ func (c *Client) waitOnListener(id ID) (msg Message, err error) {
 	}
 
 	ctx, cancel := context.WithTimeout(c.ctx, c.ReceiveTimeout)
+	defer cancel()
 
 	select {
-	case msg = <-wait:
-		cancel()
+	case msg := <-wait:
+		return msg, nil
 	case <-ctx.Done():
-		err = fmt.Errorf("timeout while waiting for message")
+		return nil, fmt.Errorf("timeout while waiting for message")
 	}
-
-	return
 }
 
 func (c *Client) notifyListener(msg Message, requestID ID) {
