@@ -35,8 +35,8 @@ type (
 	// signature string and a details map
 	AuthFunc func(helloDetails, challengeDetails map[string]interface{}) (string, map[string]interface{}, error)
 
-	// EventHandler handles a publish event.
-	EventHandler func(*Event)
+	// PublishEventHandler handles a publish event.
+	PublishEventHandler func(*Event)
 
 	// MethodHandler is an RPC endpoint.
 	MethodHandler func(args []interface{}, kwargs map[string]interface{}, details map[string]interface{}) (result *CallResult)
@@ -75,7 +75,7 @@ type (
 
 	subscription struct {
 		topic   string
-		handler EventHandler
+		handler PublishEventHandler
 	}
 )
 
@@ -249,6 +249,7 @@ func (c *Client) Receive() {
 		return
 	}
 
+MessageLoop:
 	for msg := range c.Peer.Receive() {
 
 		switch msg := msg.(type) {
@@ -282,7 +283,7 @@ func (c *Client) Receive() {
 
 		case *Goodbye:
 			log.Println("client received Goodbye message")
-			break
+			break MessageLoop
 
 		default:
 			log.Println("unhandled message:", msg.MessageType(), msg)
@@ -296,8 +297,8 @@ func (c *Client) Receive() {
 	}
 }
 
-// Subscribe registers the EventHandler to be called for every message in the provided topic.
-func (c *Client) Subscribe(topic string, options map[string]interface{}, fn EventHandler) error {
+// Subscribe registers the PublishEventHandler to be called for every message in the provided topic.
+func (c *Client) Subscribe(topic string, options map[string]interface{}, fn PublishEventHandler) error {
 	if c.Peer.Closed() {
 		return errors.New("Client is closed")
 	}
@@ -317,9 +318,7 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Even
 		Topic:   URI(topic),
 	}
 
-	err := c.Send(sub)
-
-	if err != nil {
+	if err := c.Send(sub); err != nil {
 		return err
 	}
 
@@ -350,7 +349,7 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Even
 	return nil
 }
 
-// Unsubscribe removes the registered EventHandler from the topic.
+// Unsubscribe removes the registered PublishEventHandler from the topic.
 func (c *Client) Unsubscribe(topic string) error {
 	if c.Peer.Closed() {
 		return errors.New("Client is closed")
@@ -392,8 +391,7 @@ func (c *Client) Unsubscribe(topic string) error {
 		Subscription: subscriptionID,
 	}
 
-	err := c.Send(sub)
-	if err != nil {
+	if err := c.Send(sub); err != nil {
 		return err
 	}
 
@@ -454,8 +452,7 @@ func (c *Client) Register(procedure string, fn MethodHandler, options map[string
 		Procedure: URI(procedure),
 	}
 
-	err := c.Send(register)
-	if err != nil {
+	if err := c.Send(register); err != nil {
 		return err
 	}
 
@@ -605,16 +602,17 @@ func (c *Client) waitOnListener(id ID) (msg Message, err error) {
 
 	log.Println("wait on listener:", id)
 
-	var wait chan Message
-
 	wait, ok := c.listeners[id]
 	if !ok {
 		return nil, fmt.Errorf("unknown listener ID: %v", id)
 	}
 
+	ctx, cancel := context.WithTimeout(c.ctx, c.ReceiveTimeout)
+
 	select {
 	case msg = <-wait:
-	case <-time.After(c.ReceiveTimeout):
+		cancel()
+	case <-ctx.Done():
 		err = fmt.Errorf("timeout while waiting for message")
 	}
 

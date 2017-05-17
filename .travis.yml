@@ -1,0 +1,26 @@
+language: go
+
+dist: trusty
+
+go:
+  - 1.7.x
+  - 1.8.x
+
+branches:
+  only:
+    - v2
+
+sudo: false
+
+install:
+  - wget "https://github.com/Masterminds/glide/releases/download/v0.12.3/glide-v0.12.3-linux-amd64.tar.gz"
+  - mkdir -p $HOME/bin
+  - tar -vxz -C $HOME/bin --strip=1 -f glide-v0.12.3-linux-amd64.tar.gz
+  - export PATH="$HOME/bin:$PATH"
+  - glide up
+
+before_script:
+  - go vet ./
+
+script:
+  - go test
