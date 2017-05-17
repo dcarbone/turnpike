@@ -122,12 +122,12 @@ func (r *defaultRouter) Close() error {
 			go func(r *Realm, c chan struct{}) {
 				r.Close()
 				c <- struct{}{}
-			}(realm, realmClosed)
+			}(r, realmClosed)
 
 			// wait for something to happen....
 			select {
 			case <-ctx.Done():
-				logErr(fmt.Errorf("Unable to close realm \"%s\": %s", realm.URI, ctx.Err()))
+				logErr(fmt.Errorf("Unable to close realm \"%s\": %s", r.URI, ctx.Err()))
 			case <-realmClosed:
 			}
 
