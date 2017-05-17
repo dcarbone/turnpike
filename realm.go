@@ -165,19 +165,10 @@ func (r *Realm) handleSession(sess *Session) {
 	}(sess.Id)
 
 	for {
-		var msg Message
-		var open bool
-		select {
-		case msg, open = <-sess.Receive():
-			if !open {
-				log.Println("lost session:", sess)
-				return
-			}
-		case reason := <-sess.kill:
-			logErr(sess.Send(&Goodbye{Reason: reason, Details: make(map[string]interface{})}))
-			log.Printf("kill session %s: %v", sess, reason)
-			// TODO: wait for client Goodbye?
-			return
+		msg, ok := <-sess.Receive()
+		if !ok {
+			log.Println("lost session:", sess)
+			break
 		}
 
 		log.Printf("[%s] %s: %+v", sess, msg.MessageType(), msg)
@@ -338,7 +329,7 @@ func (r *Realm) getPeer(details map[string]interface{}) (Peer, error) {
 	if details == nil {
 		details = make(map[string]interface{})
 	}
-	sess := Session{Peer: peerA, Id: NewID(), Details: details, kill: make(chan URI, 1)}
+	sess := Session{Peer: peerA, Id: NewID(), Details: details}
 	go r.handleSession(&sess)
 	log.Println("Established internal session:", sess)
 	return peerB, nil

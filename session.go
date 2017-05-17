@@ -9,8 +9,6 @@ type Session struct {
 	Peer
 	Id      ID
 	Details map[string]interface{}
-
-	kill chan URI
 }
 
 func (s Session) String() string {

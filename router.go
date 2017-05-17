@@ -153,7 +153,6 @@ func (r *defaultRouter) Accept(client Peer) error {
 		Peer:    client,
 		Id:      welcome.Id,
 		Details: welcome.Details,
-		kill:    make(chan URI, 1),
 	}
 	for _, callback := range r.sessionOpenCallbacks {
 		go callback(sess, string(hello.Realm))
