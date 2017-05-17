@@ -87,6 +87,9 @@ func (r *Realm) Close() {
 
 	r.closedLock.Unlock()
 
+	// log when done
+	defer func() { log.Printf("Realm \"%s\" is now closed.", string(r.URI)) }()
+
 	sLen := len(r.sessions)
 
 	// if there are no active sessions, move on.
@@ -97,37 +100,37 @@ func (r *Realm) Close() {
 	wg := &sync.WaitGroup{}
 	wg.Add(sLen)
 
+	// attempt to politely close connections.
 	for _, session := range r.sessions {
 		go func(s *Session) {
+			if _, ok := s.Peer.(*localPeer); !ok {
+				// will contain the message from session close
+				closeChan := make(chan error)
 
-			// will contain the message from session close
-			closeChan := make(chan error)
+				// we'll give them 2 seconds to ack the disconnect...
+				ctx, cancel := context.WithTimeout(r.ctx, 2*time.Second)
 
-			// we'll give them 2 seconds to ack the disconnect...
-			ctx, cancel := context.WithTimeout(r.ctx, 2*time.Second)
+				// attempt to close client connection gracefully...
+				go func(s *Session, c chan error) { c <- s.Close() }(s, closeChan)
 
-			// attempt to close client connection gracefully...
-			go func(s *Session, c chan error) { c <- s.Close() }(s, closeChan)
+				// wait around for something to happen...
+				select {
+				case <-ctx.Done():
+					logErr(fmt.Errorf("Unable to close session \"%d\": %s", s.Id, ctx.Err()))
+				case err := <-closeChan:
+					logErr(err)
+				}
 
-			// wait around for something to happen...
-			select {
-			case <-ctx.Done():
-				logErr(fmt.Errorf("Unable to close session \"%d\": %s", s.Id, ctx.Err()))
-			case err := <-closeChan:
-				logErr(err)
+				// do you even cancel, bro?
+				cancel()
 			}
 
 			// decrement wait group
 			wg.Done()
-
-			// do you even cancel, bro?
-			cancel()
 		}(session)
 	}
 
 	wg.Wait()
-
-	log.Printf("Realm \"%s\" is now closed.", string(r.URI))
 }
 
 func (l *localClient) onJoin(details map[string]interface{}) {
@@ -153,16 +156,6 @@ func (r *Realm) handleSession(sess *Session) {
 	r.sessionsLock.Unlock()
 
 	r.onJoin(sess.Details)
-
-	defer func(sid ID) {
-		r.sessionsLock.Lock()
-		delete(r.sessions, sid)
-		r.sessionsLock.Unlock()
-
-		r.Dealer.RemoveSession(sess)
-		r.Broker.RemoveSession(sess)
-		r.onLeave(sid)
-	}(sess.Id)
 
 	for {
 		msg, ok := <-sess.Receive()
@@ -240,6 +233,14 @@ func (r *Realm) handleSession(sess *Session) {
 			log.Println("Unhandled message:", msg.MessageType())
 		}
 	}
+
+	r.sessionsLock.Lock()
+	delete(r.sessions, sess.Id)
+	r.sessionsLock.Unlock()
+
+	r.Dealer.RemoveSession(sess)
+	r.Broker.RemoveSession(sess)
+	r.onLeave(sess.Id)
 }
 
 func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcome, error) {

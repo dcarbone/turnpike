@@ -1,6 +1,7 @@
 package turnpike
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -44,9 +45,14 @@ type Router interface {
 
 // DefaultRouter is the default WAMP router implementation.
 type defaultRouter struct {
-	realms                map[URI]*Realm
-	closing               bool
-	closeLock             sync.Mutex
+	ctx context.Context
+
+	realms     map[URI]*Realm
+	realmsLock sync.RWMutex
+
+	closed     bool
+	closedLock sync.RWMutex
+
 	sessionOpenCallbacks  []func(*Session, string)
 	sessionCloseCallbacks []func(*Session, string)
 }
@@ -54,31 +60,87 @@ type defaultRouter struct {
 // NewDefaultRouter creates a very basic WAMP router.
 func NewDefaultRouter() Router {
 	return &defaultRouter{
-		realms:                make(map[URI]*Realm),
+		ctx: context.Background(),
+
+		realms: make(map[URI]*Realm),
+
 		sessionOpenCallbacks:  []func(*Session, string){},
 		sessionCloseCallbacks: []func(*Session, string){},
 	}
 }
 
 func (r *defaultRouter) AddSessionOpenCallback(fn func(*Session, string)) {
+	r.closedLock.RLock()
+	defer r.closedLock.RUnlock()
+	if r.closed {
+		log.Println("Router is closed, will not add session open callback")
+		return
+	}
+
 	r.sessionOpenCallbacks = append(r.sessionOpenCallbacks, fn)
 }
 
 func (r *defaultRouter) AddSessionCloseCallback(fn func(*Session, string)) {
+	r.closedLock.RLock()
+	defer r.closedLock.RUnlock()
+	if r.closed {
+		log.Println("Router is closed, will not add session close callback")
+		return
+	}
+
 	r.sessionCloseCallbacks = append(r.sessionCloseCallbacks, fn)
 }
 
 func (r *defaultRouter) Close() error {
-	r.closeLock.Lock()
-	if r.closing {
-		r.closeLock.Unlock()
-		return fmt.Errorf("already closed")
+	r.closedLock.Lock()
+	if r.closed {
+		r.closedLock.Unlock()
+		return fmt.Errorf("Router is already closed")
 	}
-	r.closing = true
-	r.closeLock.Unlock()
+	r.closed = true
+	r.closedLock.Unlock()
+
+	defer func() { log.Printf("Router closed") }()
+
+	rLen := len(r.realms)
+	if 0 == rLen {
+		return nil
+	}
+
+	wg := &sync.WaitGroup{}
+	wg.Add(rLen)
+
 	for _, realm := range r.realms {
-		realm.Close()
+		go func(r *Realm) {
+			// populated if realm closes on time
+			realmClosed := make(chan struct{})
+
+			// give realm 5 seconds to several all connections (each connection should close asynchronously...)
+			ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
+
+			// attempt to close realm politely...
+			go func(r *Realm, c chan struct{}) {
+				r.Close()
+				c <- struct{}{}
+			}(realm, realmClosed)
+
+			// wait for something to happen....
+			select {
+			case <-ctx.Done():
+				logErr(fmt.Errorf("Unable to close realm \"%s\": %s", realm.URI, ctx.Err()))
+			case <-realmClosed:
+			}
+
+			// decrement wait group
+			wg.Done()
+
+			// cancel timer
+			cancel()
+		}(realm)
 	}
+
+	wg.Wait()
+
 	return nil
 }
 
@@ -93,7 +155,7 @@ func (r *defaultRouter) RegisterRealm(uri URI, realm *Realm) error {
 }
 
 func (r *defaultRouter) Accept(client Peer) error {
-	if r.closing {
+	if r.closed {
 		logErr(client.Send(&Abort{Reason: ErrSystemShutdown}))
 		logErr(client.Close())
 		return fmt.Errorf("Router is closing, no new connections are allowed")
