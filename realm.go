@@ -1,6 +1,7 @@
 package turnpike
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -20,6 +21,8 @@ type Realm struct {
 	Authorizer
 	Interceptor
 
+	ctx context.Context
+
 	URI              URI
 	CRAuthenticators map[string]CRAuthenticator
 	Authenticators   map[string]Authenticator
@@ -32,7 +35,6 @@ type Realm struct {
 	closedLock sync.RWMutex
 
 	localClient
-	acts chan func()
 }
 
 type localClient struct {
@@ -41,7 +43,9 @@ type localClient struct {
 
 func (r *Realm) init() {
 	r.sessions = make(map[ID]*Session)
-	r.acts = make(chan func())
+
+	r.ctx = context.Background()
+
 	p, _ := r.getPeer(nil)
 
 	r.localClient.Client = NewClient(p)
@@ -63,7 +67,6 @@ func (r *Realm) init() {
 	}
 
 	go r.localClient.Receive()
-	go r.run()
 }
 
 func (r *Realm) Closed() bool {
@@ -74,38 +77,57 @@ func (r *Realm) Closed() bool {
 
 // Close disconnects all clients after sending a goodbye message
 func (r *Realm) Close() {
-	r.acts <- func() {
-		for _, client := range r.sessions {
-			client.kill <- ErrSystemShutdown
-		}
+	r.closedLock.Lock()
+
+	if r.closed {
+		log.Printf("Realm \"%s\" is already closing", string(r.URI))
+		r.closedLock.Unlock()
+		return
 	}
 
-	var (
-		s        = make(chan struct{})
-		nclients int
-	)
-	for {
-		r.acts <- func() {
-			nclients = len(r.sessions)
-			s <- struct{}{}
-		}
-		<-s
-		if nclients == 0 {
-			break
-		}
+	r.closedLock.Unlock()
+
+	sLen := len(r.sessions)
+
+	// if there are no active sessions, move on.
+	if 0 == sLen {
+		return
 	}
 
-	close(r.acts)
-}
+	wg := &sync.WaitGroup{}
+	wg.Add(sLen)
 
-func (r *Realm) run() {
-	for {
-		if act, ok := <-r.acts; ok {
-			act()
-		} else {
-			return
-		}
+	for _, session := range r.sessions {
+		go func(s *Session) {
+
+			// will contain the message from session close
+			closeChan := make(chan error)
+
+			// we'll give them 2 seconds to ack the disconnect...
+			ctx, cancel := context.WithTimeout(r.ctx, 2*time.Second)
+
+			// attempt to close client connection gracefully...
+			go func(s *Session, c chan error) { c <- s.Close() }(s, closeChan)
+
+			// wait around for something to happen...
+			select {
+			case <-ctx.Done():
+				logErr(fmt.Errorf("Unable to close session \"%d\": %s", s.Id, ctx.Err()))
+			case err := <-closeChan:
+				logErr(err)
+			}
+
+			// decrement wait group
+			wg.Done()
+
+			// do you even cancel, bro?
+			cancel()
+		}(session)
 	}
+
+	wg.Wait()
+
+	log.Printf("Realm \"%s\" is now closed.", string(r.URI))
 }
 
 func (l *localClient) onJoin(details map[string]interface{}) {
@@ -117,29 +139,36 @@ func (l *localClient) onLeave(session ID) {
 }
 
 func (r *Realm) handleSession(sess *Session) {
-	s := make(chan struct{})
-	r.acts <- func() {
-		r.sessions[sess.Id] = sess
-		r.onJoin(sess.Details)
-		s <- struct{}{}
+	r.closedLock.RLock()
+	if r.closed {
+		log.Printf("Will not handle session \"%d\" as realm \"%s\" is already closed", sess.Id, string(r.URI))
+		r.closedLock.RUnlock()
+		return
 	}
-	<-s
-	defer func() {
-		r.acts <- func() {
-			delete(r.sessions, sess.Id)
-			r.Dealer.RemoveSession(sess)
-			r.Broker.RemoveSession(sess)
-			r.onLeave(sess.Id)
-		}
-	}()
-	c := sess.Receive()
-	// TODO: what happens if the realm is closed?
+
+	r.closedLock.RUnlock()
+
+	r.sessionsLock.Lock()
+	r.sessions[sess.Id] = sess
+	r.sessionsLock.Unlock()
+
+	r.onJoin(sess.Details)
+
+	defer func(sid ID) {
+		r.sessionsLock.Lock()
+		delete(r.sessions, sid)
+		r.sessionsLock.Unlock()
+
+		r.Dealer.RemoveSession(sess)
+		r.Broker.RemoveSession(sess)
+		r.onLeave(sid)
+	}(sess.Id)
 
 	for {
 		var msg Message
 		var open bool
 		select {
-		case msg, open = <-c:
+		case msg, open = <-sess.Receive():
 			if !open {
 				log.Println("lost session:", sess)
 				return
