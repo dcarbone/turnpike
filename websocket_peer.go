@@ -136,28 +136,10 @@ func (ep *webSocketPeer) write() {
 			continue
 		}
 
-		errChan := make(chan error)
-		go func() { errChan <- ep.conn.WriteMessage(ep.payloadType, b) }()
-
-		ctx, cancel := context.WithTimeout(ep.ctx, 2*time.Second)
-
-		select {
-		case <-ctx.Done():
-			ep.closedLock.Lock()
-			ep.closed = true
-			ep.closedLock.Unlock()
-
-			logErr(errors.New("Message write timeout exceeded"))
-
-			ep.closeIOChans()
-			ep.conn.Close()
-			return
-
-		case err = <-errChan:
-			cancel()
-			if nil != err {
-				log.Printf("unable to write message \"%s\": %s", msg.MessageType(), err)
-			}
+		// TODO: implement timeout?
+		err = ep.conn.WriteMessage(ep.payloadType, b)
+		if nil != err {
+			log.Printf("unable to write message \"%s\": %s", msg.MessageType(), err)
 		}
 	}
 }

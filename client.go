@@ -103,13 +103,7 @@ func NewClient(p Peer) *Client {
 		procedures: make(map[ID]*procedureDescription),
 	}
 
-	go c.run()
-
 	return c
-}
-
-func (c *Client) run() {
-
 }
 
 // LeaveRealm leaves the current realm without closing the connection to the server.
@@ -249,6 +243,11 @@ func (c *Client) joinRealmCRA(realm string, details map[string]interface{}) (map
 //
 // This function blocks and is most commonly run in a goroutine.
 func (c *Client) Receive() {
+	if c.Peer.Closed() {
+		log.Printf("Client cannot receive, it's peer is closed")
+		return
+	}
+
 	for msg := range c.Peer.Receive() {
 
 		switch msg := msg.(type) {
@@ -259,11 +258,12 @@ func (c *Client) Receive() {
 		case *Invocation:
 			c.handleInvocation(msg)
 
-		case *Registered:
-			c.notifyListener(msg, msg.Request)
 		case *Subscribed:
 			c.notifyListener(msg, msg.Request)
 		case *Unsubscribed:
+			c.notifyListener(msg, msg.Request)
+
+		case *Registered:
 			c.notifyListener(msg, msg.Request)
 		case *Unregistered:
 			c.notifyListener(msg, msg.Request)
@@ -291,12 +291,18 @@ func (c *Client) Receive() {
 
 // Subscribe registers the EventHandler to be called for every message in the provided topic.
 func (c *Client) Subscribe(topic string, options map[string]interface{}, fn EventHandler) error {
+	if c.Peer.Closed() {
+		return errors.New("Client is closed")
+	}
+
 	if options == nil {
 		options = make(map[string]interface{})
 	}
 
 	id := NewID()
+
 	c.registerListener(id)
+	defer c.deleteListener(id)
 
 	sub := &Subscribe{
 		Request: id,
@@ -312,7 +318,6 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Even
 
 	// wait to receive SUBSCRIBED message
 	msg, err := c.waitOnListener(id)
-	c.deleteListener(id)
 
 	if err != nil {
 		return err
@@ -329,8 +334,11 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Even
 
 // Unsubscribe removes the registered EventHandler from the topic.
 func (c *Client) Unsubscribe(topic string) error {
+	if c.Peer.Closed() {
+		return errors.New("Client is closed")
+	}
+
 	c.eventsLock.RLock()
-	defer c.eventsLock.RUnlock()
 
 	var subscriptionID ID
 
@@ -341,12 +349,19 @@ func (c *Client) Unsubscribe(topic string) error {
 		}
 	}
 
+	c.eventsLock.RUnlock()
+
 	if 0 == subscriptionID {
 		return fmt.Errorf("Event %s is not registered with this client.", topic)
 	}
 
+	// queue up event for deletion
+	defer c.deleteEventHandler(subscriptionID)
+
 	id := NewID()
+
 	c.registerListener(id)
+	defer c.deleteListener(id)
 
 	sub := &Unsubscribe{
 		Request:      id,
@@ -360,7 +375,6 @@ func (c *Client) Unsubscribe(topic string) error {
 
 	// wait to receive UNSUBSCRIBED message
 	msg, err := c.waitOnListener(id)
-	c.deleteListener(id)
 
 	if err != nil {
 		return err
@@ -370,13 +384,15 @@ func (c *Client) Unsubscribe(topic string) error {
 		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeUnsubscribed))
 	}
 
-	c.deleteEventHandler(subscriptionID)
-
 	return nil
 }
 
 // Publish publishes an EVENT to all subscribed peers.
 func (c *Client) Publish(topic string, options map[string]interface{}, args []interface{}, kwargs map[string]interface{}) error {
+	if c.Peer.Closed() {
+		return errors.New("Client is closed")
+	}
+
 	if options == nil {
 		options = make(map[string]interface{})
 	}
@@ -391,8 +407,14 @@ func (c *Client) Publish(topic string, options map[string]interface{}, args []in
 
 // Register registers a MethodHandler procedure with the router.
 func (c *Client) Register(procedure string, fn MethodHandler, options map[string]interface{}) error {
+	if c.Peer.Closed() {
+		return errors.New("Client is closed")
+	}
+
 	id := NewID()
+
 	c.registerListener(id)
+	defer c.deleteListener(id)
 
 	register := &Register{
 		Request:   id,
@@ -407,7 +429,6 @@ func (c *Client) Register(procedure string, fn MethodHandler, options map[string
 
 	// wait to receive REGISTERED message
 	msg, err := c.waitOnListener(id)
-	c.deleteListener(id)
 
 	if err != nil {
 		return err
@@ -424,6 +445,10 @@ func (c *Client) Register(procedure string, fn MethodHandler, options map[string
 
 // BasicRegister registers a BasicMethodHandler procedure with the router
 func (c *Client) BasicRegister(procedure string, fn BasicMethodHandler) error {
+	if c.Peer.Closed() {
+		return errors.New("Client is closed")
+	}
+
 	wrap := func(args []interface{}, kwargs map[string]interface{},
 		details map[string]interface{}) (result *CallResult) {
 		return fn(args, kwargs)
@@ -433,6 +458,10 @@ func (c *Client) BasicRegister(procedure string, fn BasicMethodHandler) error {
 
 // Unregister removes a procedure with the router
 func (c *Client) Unregister(procedure string) error {
+	if c.Peer.Closed() {
+		return errors.New("Client is closed")
+	}
+
 	c.proceduresLock.RLock()
 
 	var procedureID ID
@@ -452,8 +481,15 @@ func (c *Client) Unregister(procedure string) error {
 		return fmt.Errorf("Procedure %s is not registered with this client.", procedure)
 	}
 
+	// queue up procedure for deletion
+	defer c.deleteProcedure(procedureID)
+
 	id := NewID()
+
+	// register new listener
 	c.registerListener(id)
+	defer c.deleteListener(id)
+
 	unregister := &Unregister{
 		Request:      id,
 		Registration: procedureID,
@@ -465,7 +501,6 @@ func (c *Client) Unregister(procedure string) error {
 
 	// wait to receive UNREGISTERED message
 	msg, err := c.waitOnListener(id)
-	c.deleteListener(id)
 
 	if err != nil {
 		return err
@@ -475,15 +510,19 @@ func (c *Client) Unregister(procedure string) error {
 		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeUnregistered))
 	}
 
-	c.deleteProcedure(procedureID)
-
 	return nil
 }
 
 // Call calls a procedure given a URI.
 func (c *Client) Call(procedure string, options map[string]interface{}, args []interface{}, kwargs map[string]interface{}) (*Result, error) {
+	if c.Peer.Closed() {
+		return nil, errors.New("Client is closed")
+	}
+
 	id := NewID()
+
 	c.registerListener(id)
+	defer c.deleteListener(id)
 
 	call := &Call{
 		Request:     id,
@@ -500,7 +539,6 @@ func (c *Client) Call(procedure string, options map[string]interface{}, args []i
 	// wait to receive RESULT message
 	var msg Message
 	msg, err = c.waitOnListener(id)
-	c.deleteListener(id)
 
 	if err != nil {
 		return nil, err
