@@ -1,5 +1,7 @@
-Turnpike [![Build Status](https://drone.io/github.com/jcelliott/turnpike/status.png)](https://drone.io/github.com/jcelliott/turnpike/latest) [![Coverage Status](https://coveralls.io/repos/jcelliott/turnpike/badge.svg?branch=v2)](https://coveralls.io/r/jcelliott/turnpike?branch=v2) [![GoDoc](https://godoc.org/gopkg.in/jcelliott/turnpike?status.svg)](http://godoc.org/gopkg.in/jcelliott/turnpike.v2)
+Turnpike 
 ===
+[![Build Status](https://travis-ci.org/dcarbone/turnpike.svg?branch=v2)](https://travis-ci.org/dcarbone/turnpike?branch=v2)
+[![GoDoc](https://godoc.org/github.com/dcarbone/turnpike.v2?status.svg)](http://godoc.org/gopkg.in/dcarbone/turnpike.v2)
 
 Go implementation of [WAMP](http://wamp.ws/) - The Web Application Messaging Protocol
 
@@ -18,32 +20,22 @@ basic stand-alone router. The router library can be used to embed a WAMP router
 in another application, or to build a custom router implementation. The client
 library can be used to communicate with any WAMP router.
 
-This version of Turnpike supports WAMP v2. For WAMP v1 support see the [v1 branch](https://github.com/jcelliott/turnpike/tree/v1).
-
 Status
 ---
 
 Turnpike v2 is still under development, but is getting close to a stable
 release. If you have any feedback or suggestions, please
-[open an issue](https://github.com/jcelliott/turnpike/issues/new).
+[open an issue](https://github.com/dcarbone/turnpike/issues/new).
 
 Installation
 ---
 
-Library:
-
-    go get -u gopkg.in/jcelliott/turnpike.v2
-
-Stand-alone router:
-
-    go get -u gopkg.in/jcelliott/turnpike.v2/turnpike
+This library is designed to be used with [Glide](https://github.com/Masterminds/glide)
 
 Client library usage
 ---
 
-```go
-// TODO
-```
+TODO
 
 Server library usage
 ---
@@ -56,12 +48,12 @@ import (
 	"log"
 	"net/http"
 
-	"gopkg.in/jcelliott/turnpike.v2"
+	"github.com/dcarbone/turnpike"
 )
 
 func main() {
 	turnpike.Debug()
-	s := turnpike.NewBasicWebsocketServer("example.realm")
+	s := turnpike.NewBasicWebSocketServer("example.realm")
 	server := &http.Server{
 		Handler: s,
 		Addr:    ":8000",
