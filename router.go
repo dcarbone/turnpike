@@ -103,6 +103,9 @@ func (r *defaultRouter) Close() error {
 
 	defer func() { log.Printf("Router closed") }()
 
+	r.realmsLock.Lock()
+	defer r.realmsLock.Unlock()
+
 	rLen := len(r.realms)
 	if 0 == rLen {
 		return nil
@@ -112,23 +115,23 @@ func (r *defaultRouter) Close() error {
 	wg.Add(rLen)
 
 	for _, realm := range r.realms {
-		go func(r *Realm) {
+		go func(realm *Realm) {
 			// populated if realm closes on time
 			realmClosed := make(chan struct{})
 
 			// give realm 5 seconds to several all connections (each connection should close asynchronously...)
-			ctx, cancel := context.WithTimeout(r.ctx, 5*time.Second)
+			ctx, cancel := context.WithTimeout(realm.ctx, 5*time.Second)
 
 			// attempt to close realm politely...
 			go func(r *Realm, c chan struct{}) {
 				r.Close()
 				c <- struct{}{}
-			}(r, realmClosed)
+			}(realm, realmClosed)
 
 			// wait for something to happen....
 			select {
 			case <-ctx.Done():
-				logErr(fmt.Errorf("Unable to close realm \"%s\": %s", r.URI, ctx.Err()))
+				logErr(fmt.Errorf("Unable to close realm \"%s\": %s", realm.URI, ctx.Err()))
 			case <-realmClosed:
 			}
 
@@ -137,6 +140,8 @@ func (r *defaultRouter) Close() error {
 
 			// cancel timer
 			cancel()
+
+			delete(r.realms, realm.URI)
 		}(realm)
 	}
 
@@ -150,12 +155,19 @@ func (r *defaultRouter) RegisterRealm(realm *Realm) error {
 		return errors.New("Unable to register realm: \"URI\" cannot be empty")
 	}
 
+	r.realmsLock.Lock()
+	defer r.realmsLock.Unlock()
+
 	if _, ok := r.realms[realm.URI]; ok {
 		return RealmExistsError(realm.URI)
 	}
-	realm.init()
+
 	r.realms[realm.URI] = realm
+
+	realm.init()
+
 	log.Println("registered realm:", realm.URI)
+
 	return nil
 }
 
@@ -178,6 +190,9 @@ func (r *defaultRouter) Accept(peer Peer) error {
 		logErr(peer.Close())
 		return fmt.Errorf("protocol violation: expected HELLO, received %s", msg.MessageType())
 	}
+
+	r.realmsLock.RLock()
+	defer r.realmsLock.RUnlock()
 
 	realm, ok := r.realms[hello.Realm]
 	if !ok {
@@ -235,6 +250,9 @@ func (r *defaultRouter) Accept(peer Peer) error {
 
 // GetLocalPeer returns an internal peer connected to the specified realm.
 func (r *defaultRouter) GetLocalPeer(realmURI URI, details map[string]interface{}) (Peer, error) {
+	r.realmsLock.RLock()
+	defer r.realmsLock.RUnlock()
+
 	realm, ok := r.realms[realmURI]
 	if !ok {
 		return nil, NoSuchRealmError(realmURI)
