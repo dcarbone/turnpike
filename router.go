@@ -140,12 +140,12 @@ func (r *defaultRouter) Close() error {
 
 			// cancel timer
 			cancel()
-
-			delete(r.realms, realm.URI)
 		}(realm)
 	}
 
 	wg.Wait()
+
+	r.realms = make(map[URI]*Realm)
 
 	return nil
 }

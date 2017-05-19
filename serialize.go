@@ -30,7 +30,11 @@ func apply(msgType MessageType, arr []interface{}) (Message, error) {
 	if val.Kind() == reflect.Ptr {
 		val = val.Elem()
 	}
-	for i := 0; i < val.NumField() && i < len(arr)-1; i++ {
+
+	numField := val.NumField()
+	arrLen := len(arr)
+
+	for i := 0; i < numField && i < arrLen-1; i++ {
 		f := val.Field(i)
 		if arr[i+1] == nil {
 			continue
