@@ -21,7 +21,7 @@ func connectedTestClients() (*Client, *Client) {
 }
 
 func newTestClient(p Peer) *Client {
-	client := NewClient(p)
+	client, _ := NewClient(p)
 	client.ReceiveTimeout = 100 * time.Millisecond
 	_, err := client.JoinRealm("turnpike.test", nil)
 	So(err, ShouldBeNil)
@@ -33,7 +33,7 @@ func TestJoinRealm(t *testing.T) {
 		peer := newTestRouter().getTestPeer()
 
 		Convey("A client should be able to succesfully join a realm", func() {
-			client := NewClient(peer)
+			client, _ := NewClient(peer)
 			_, err := client.JoinRealm("turnpike.test", nil)
 			So(err, ShouldBeNil)
 		})
@@ -54,7 +54,7 @@ func TestJoinRealmWithAuth(t *testing.T) {
 		peer := router.getTestPeer()
 
 		Convey("A client should be able to successfully authenticate and join a realm", func() {
-			client := NewClient(peer)
+			client, _ := NewClient(peer)
 			client.Auth = map[string]AuthFunc{"testauth": testAuthFunc}
 			details := map[string]interface{}{"username": "tester"}
 			_, err := client.JoinRealm("turnpike.test.auth", details)

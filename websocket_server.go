@@ -95,8 +95,14 @@ func (s *WebSocketServer) GetLocalClient(realm string, details map[string]interf
 	if err != nil {
 		return nil, err
 	}
-	c := NewClient(peer)
+
+	c, err := NewClient(peer)
+	if nil != err {
+		return nil, err
+	}
+
 	go c.Receive()
+
 	return c, nil
 }
 

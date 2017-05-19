@@ -42,13 +42,11 @@ type localClient struct {
 }
 
 func (r *Realm) init() {
+	var err error
+
 	r.sessions = make(map[ID]*Session)
 
 	r.ctx = context.Background()
-
-	p, _ := r.getPeer(nil)
-
-	r.localClient.Client = NewClient(p)
 
 	if r.Broker == nil {
 		r.Broker = NewDefaultBroker()
@@ -66,7 +64,15 @@ func (r *Realm) init() {
 		r.AuthTimeout = defaultAuthTimeout
 	}
 
+	peerA, peerB := localPipe()
+	sess := Session{Peer: peerA, Id: NewID()}
+	r.localClient.Client, err = NewClient(peerB)
+	if nil != err {
+		panic(fmt.Sprintf("Unable to initialize Realm: %s", err))
+	}
+
 	go r.localClient.Receive()
+	go r.handleSession(&sess)
 }
 
 func (r *Realm) Closed() bool {
@@ -84,6 +90,8 @@ func (r *Realm) Close() {
 		r.closedLock.Unlock()
 		return
 	}
+
+	r.closed = true
 
 	r.closedLock.Unlock()
 
@@ -157,14 +165,9 @@ func (r *Realm) handleSession(sess *Session) {
 
 	r.onJoin(sess.Details)
 
-	for {
-		msg, ok := <-sess.Receive()
-		if !ok {
-			log.Println("lost session:", sess)
-			break
-		}
+	for msg := range sess.Receive() {
+		log.Printf("[session-%s] %s: %+v", sess, msg.MessageType(), msg)
 
-		log.Printf("[%s] %s: %+v", sess, msg.MessageType(), msg)
 		if isAuthz, err := r.Authorizer.Authorize(sess, msg); !isAuthz {
 			errMsg := &Error{Type: msg.MessageType()}
 			switch msg := msg.(type) {
@@ -327,12 +330,17 @@ func (r *Realm) checkResponse(chal *Challenge, auth *Authenticate) (*Welcome, er
 
 func (r *Realm) getPeer(details map[string]interface{}) (Peer, error) {
 	peerA, peerB := localPipe()
+
 	if details == nil {
 		details = make(map[string]interface{})
 	}
+
 	sess := Session{Peer: peerA, Id: NewID(), Details: details}
+
 	go r.handleSession(&sess)
+
 	log.Println("Established internal session:", sess)
+
 	return peerB, nil
 }
 

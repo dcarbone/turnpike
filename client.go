@@ -87,11 +87,15 @@ func NewWebSocketClient(serialization SerializationFormat, url string, tlscfg *t
 		return nil, err
 	}
 
-	return NewClient(p), nil
+	return NewClient(p)
 }
 
 // NewClient takes a connected Peer and returns a new Client
-func NewClient(p Peer) *Client {
+func NewClient(p Peer) (*Client, error) {
+	if nil == p {
+		return nil, errors.New("Unable to construct client: Peer cannot be nil")
+	}
+
 	c := &Client{
 		Peer:           p,
 		ReceiveTimeout: 10 * time.Second,
@@ -104,7 +108,7 @@ func NewClient(p Peer) *Client {
 		procedures: make(map[ID]*procedureDescription),
 	}
 
-	return c
+	return c, nil
 }
 
 // LeaveRealm leaves the current realm without closing the connection to the server.
@@ -120,13 +124,6 @@ func (c *Client) Close() error {
 	if c.Peer.Closed() {
 		return errors.New("Client already closed")
 	}
-
-	// always attempt to close peer
-	defer func(p Peer) {
-		if err := p.Close(); err != nil {
-			log.Printf("error closing client connection: %v", err)
-		}
-	}(c.Peer)
 
 	// attempt to leave realm
 	if err := c.LeaveRealm(); err != nil {
@@ -301,6 +298,10 @@ MessageLoop:
 func (c *Client) Subscribe(topic string, options map[string]interface{}, fn PublishEventHandler) error {
 	if c.Peer.Closed() {
 		return errors.New("Client is closed")
+	}
+
+	if nil == fn {
+		return fmt.Errorf("Unable to subscribe to topic \"%s\": no PublishEventHandler defined", topic)
 	}
 
 	if options == nil {
