@@ -3,6 +3,7 @@ package turnpike
 import (
 	"github.com/gorilla/websocket"
 	"net/http"
+	"sync"
 )
 
 // WebSocketServer handles websocket connections.
@@ -10,7 +11,8 @@ type WebSocketServer struct {
 	Router
 	Upgrader *websocket.Upgrader
 
-	protocols map[WebSocketProtocol]webSocketProtocol
+	protocols     map[WebSocketProtocol]webSocketProtocol
+	protocolsLock sync.RWMutex
 
 	// The serializer to use for text frames. Defaults to JSONSerializer.
 	TextSerializer Serializer
@@ -51,15 +53,21 @@ func newWebSocketServer(r Router) *WebSocketServer {
 
 // RegisterProtocol registers a serializer that should be used for a given protocol string and payload type.
 func (s *WebSocketServer) RegisterProtocol(protocol WebSocketProtocol, payloadType int, serializer Serializer) error {
+	s.protocolsLock.Lock()
+	defer s.protocolsLock.Unlock()
+
 	log.Println("RegisterProtocol:", protocol)
 	if payloadType != websocket.TextMessage && payloadType != websocket.BinaryMessage {
 		return invalidPayload(payloadType)
 	}
+
 	if _, ok := s.protocols[protocol]; ok {
 		return protocolExists(protocol)
 	}
+
 	s.protocols[protocol] = webSocketProtocol{payloadType, serializer}
 	s.Upgrader.Subprotocols = append(s.Upgrader.Subprotocols, string(protocol))
+
 	return nil
 }
 
@@ -96,6 +104,10 @@ func (s *WebSocketServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *WebSocketServer) handleWebSocket(conn *websocket.Conn) {
 	var serializer Serializer
 	var payloadType int
+
+	s.protocolsLock.RLock()
+	defer s.protocolsLock.RUnlock()
+
 	if proto, ok := s.protocols[WebSocketProtocol(conn.Subprotocol())]; ok {
 		serializer = proto.serializer
 		payloadType = proto.payloadType
