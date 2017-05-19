@@ -2,6 +2,7 @@ package turnpike
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -37,7 +38,7 @@ func (e AuthenticationError) Error() string {
 type Router interface {
 	Accept(Peer) error
 	Close() error
-	RegisterRealm(URI, *Realm) error
+	RegisterRealm(*Realm) error
 	GetLocalPeer(URI, map[string]interface{}) (Peer, error)
 	AddSessionOpenCallback(func(*Session, string))
 	AddSessionCloseCallback(func(*Session, string))
@@ -144,13 +145,17 @@ func (r *defaultRouter) Close() error {
 	return nil
 }
 
-func (r *defaultRouter) RegisterRealm(uri URI, realm *Realm) error {
-	if _, ok := r.realms[uri]; ok {
-		return RealmExistsError(uri)
+func (r *defaultRouter) RegisterRealm(realm *Realm) error {
+	if "" == realm.URI {
+		return errors.New("Unable to register realm: \"URI\" cannot be empty")
+	}
+
+	if _, ok := r.realms[realm.URI]; ok {
+		return RealmExistsError(realm.URI)
 	}
 	realm.init()
-	r.realms[uri] = realm
-	log.Println("registered realm:", uri)
+	r.realms[realm.URI] = realm
+	log.Println("registered realm:", realm.URI)
 	return nil
 }
 

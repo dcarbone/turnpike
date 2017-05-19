@@ -84,19 +84,21 @@ func (r *Realm) Closed() bool {
 // Close disconnects all clients after sending a goodbye message
 func (r *Realm) Close() {
 	r.closedLock.Lock()
-
 	if r.closed {
 		log.Printf("Realm \"%s\" is already closing", string(r.URI))
 		r.closedLock.Unlock()
 		return
 	}
-
 	r.closed = true
-
 	r.closedLock.Unlock()
 
+	r.sessionsLock.RLock()
+
 	// log when done
-	defer func() { log.Printf("Realm \"%s\" is now closed.", string(r.URI)) }()
+	defer func(uri URI) {
+		r.sessionsLock.RUnlock()
+		log.Printf("Realm \"%s\" is now closed.", uri)
+	}(r.URI)
 
 	sLen := len(r.sessions)
 
