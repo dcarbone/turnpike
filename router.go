@@ -54,8 +54,11 @@ type defaultRouter struct {
 	closed     bool
 	closedLock sync.RWMutex
 
-	sessionOpenCallbacks  []func(*Session, string)
-	sessionCloseCallbacks []func(*Session, string)
+	sessionOpenCallbacks     []func(*Session, string)
+	sessionOpenCallbacksLock sync.RWMutex
+
+	sessionCloseCallbacks     []func(*Session, string)
+	sessionCloseCallbacksLock sync.RWMutex
 }
 
 // NewDefaultRouter creates a very basic WAMP router.
@@ -78,6 +81,9 @@ func (r *defaultRouter) AddSessionOpenCallback(fn func(*Session, string)) {
 		return
 	}
 
+	r.sessionOpenCallbacksLock.Lock()
+	defer r.sessionOpenCallbacksLock.Unlock()
+
 	r.sessionOpenCallbacks = append(r.sessionOpenCallbacks, fn)
 }
 
@@ -88,6 +94,9 @@ func (r *defaultRouter) AddSessionCloseCallback(fn func(*Session, string)) {
 		log.Println("Router is closed, will not add session close callback")
 		return
 	}
+
+	r.sessionCloseCallbacksLock.Lock()
+	defer r.sessionCloseCallbacksLock.Unlock()
 
 	r.sessionCloseCallbacks = append(r.sessionCloseCallbacks, fn)
 }
@@ -174,7 +183,6 @@ func (r *defaultRouter) RegisterRealm(realm *Realm) error {
 func (r *defaultRouter) Accept(peer Peer) error {
 	if r.closed {
 		logErr(peer.Send(&Abort{Reason: ErrSystemShutdown}))
-		logErr(peer.Close())
 		return fmt.Errorf("Router is closing, no new connections are allowed")
 	}
 
@@ -187,7 +195,6 @@ func (r *defaultRouter) Accept(peer Peer) error {
 	hello, ok := msg.(*Hello)
 	if !ok {
 		logErr(peer.Send(&Abort{Reason: URI("wamp.error.protocol_violation")}))
-		logErr(peer.Close())
 		return fmt.Errorf("protocol violation: expected HELLO, received %s", msg.MessageType())
 	}
 
@@ -197,7 +204,6 @@ func (r *defaultRouter) Accept(peer Peer) error {
 	realm, ok := r.realms[hello.Realm]
 	if !ok {
 		logErr(peer.Send(&Abort{Reason: ErrNoSuchRealm}))
-		logErr(peer.Close())
 		return NoSuchRealmError(hello.Realm)
 	}
 
@@ -208,7 +214,6 @@ func (r *defaultRouter) Accept(peer Peer) error {
 			Details: map[string]interface{}{"error": err.Error()},
 		}
 		logErr(peer.Send(abort))
-		logErr(peer.Close())
 		return AuthenticationError(err.Error())
 	}
 
@@ -236,14 +241,20 @@ func (r *defaultRouter) Accept(peer Peer) error {
 		Id:      welcome.Id,
 		Details: welcome.Details,
 	}
+	r.sessionOpenCallbacksLock.RLock()
 	for _, callback := range r.sessionOpenCallbacks {
 		go callback(sess, string(hello.Realm))
 	}
+	r.sessionOpenCallbacksLock.RUnlock()
+
 	go func() {
 		realm.handleSession(sess)
+
+		r.sessionCloseCallbacksLock.RLock()
 		for _, callback := range r.sessionCloseCallbacks {
 			go callback(sess, string(hello.Realm))
 		}
+		r.sessionCloseCallbacksLock.RUnlock()
 	}()
 	return nil
 }

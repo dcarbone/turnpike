@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	realm  string
-	port   int
-	debug  bool
-	client bool
+	realm   string
+	port    int
+	msgpack bool
+	debug   bool
+	client  bool
 )
 
 func init() {
@@ -27,6 +28,7 @@ func init() {
 	flag.IntVar(&port, "port", 8000, "port to run on")
 	flag.BoolVar(&debug, "debug", false, "enable debug logging")
 	flag.BoolVar(&client, "client", false, "run client")
+	flag.BoolVar(&msgpack, "msgPack", false, "use MSGPack (client-only)")
 }
 
 func main() {
@@ -44,7 +46,14 @@ func main() {
 		log.Printf("  Port: %d", port)
 		log.Printf("  Debug: %s", strconv.FormatBool(debug))
 
-		c, err := turnpike.NewWebSocketClient(turnpike.SerializationFormatJSON, fmt.Sprintf("ws://localhost:%d/", port), nil, nil)
+		var messageFormat turnpike.SerializationFormat
+		if msgpack {
+			messageFormat = turnpike.SerializationFormatMSGPack
+		} else {
+			messageFormat = turnpike.SerializationFormatJSON
+		}
+
+		c, err := turnpike.NewWebSocketClient(messageFormat, fmt.Sprintf("ws://localhost:%d/", port), nil, nil)
 		if nil != err {
 			log.Printf("Unable to create client: %s", err)
 			os.Exit(1)

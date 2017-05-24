@@ -459,17 +459,23 @@ func (c *Client) Register(procedure string, fn MethodHandler, options map[string
 
 	// wait to receive REGISTERED message
 	msg, err := c.waitOnListener(id)
-
-	if err != nil {
+	if nil != err {
 		return err
-	} else if e, ok := msg.(*Error); ok {
-		return fmt.Errorf("error registering procedure '%v': %v", procedure, e.Error)
-	} else if registered, ok := msg.(*Registered); !ok {
-		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeRegistered))
-	} else {
-		// register the event handler with this registration
-		c.registerProcedure(registered.Registration, &procedureDescription{procedure, fn})
 	}
+
+	e, ok := msg.(*Error)
+	if ok {
+		return fmt.Errorf("error registering procedure '%v': %v", procedure, e.Error)
+	}
+
+	registered, ok := msg.(*Registered)
+	if !ok {
+		return fmt.Errorf(formatUnexpectedMessage(msg, MessageTypeRegistered))
+	}
+
+	// register the event handler with this registration
+	c.registerProcedure(registered.Registration, &procedureDescription{procedure, fn})
+
 	return nil
 }
 
