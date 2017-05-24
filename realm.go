@@ -170,7 +170,55 @@ func (r *Realm) handleSession(sess *Session) {
 	for msg := range sess.Receive() {
 		log.Printf("[session-%s] %s: %+v", sess, msg.MessageType(), msg)
 
-		if isAuthz, err := r.Authorizer.Authorize(sess, msg); !isAuthz {
+		// attempt authorization...
+		isAuthz, authErr := r.Authorizer.Authorize(sess, msg)
+		if isAuthz {
+			// if authorized
+
+			// call interceptor
+			r.Interceptor.Intercept(sess, &msg)
+
+			// handle message
+			switch msg := msg.(type) {
+			case *Goodbye:
+				logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
+				log.Printf("[%s] leaving: %v", sess, msg.Reason)
+				return
+
+				// Broker messages
+			case *Publish:
+				r.Broker.Publish(sess, msg)
+			case *Subscribe:
+				r.Broker.Subscribe(sess, msg)
+			case *Unsubscribe:
+				r.Broker.Unsubscribe(sess, msg)
+
+				// Dealer messages
+			case *Register:
+				r.Dealer.Register(sess, msg)
+			case *Unregister:
+				r.Dealer.Unregister(sess, msg)
+			case *Call:
+				r.Dealer.Call(sess, msg)
+			case *Yield:
+				r.Dealer.Yield(sess, msg)
+
+				// Error messages
+			case *Error:
+				if msg.Type == MessageTypeInvocation {
+					// the only type of ERROR message the router should receive
+					r.Dealer.Error(sess, msg)
+				} else {
+					log.Printf("invalid ERROR message received: %v", msg)
+				}
+
+			default:
+				log.Println("Unhandled message:", msg.MessageType())
+			}
+		} else {
+			// if unauthorized...
+
+			// create error message...
 			errMsg := &Error{Type: msg.MessageType()}
 			switch msg := msg.(type) {
 			case *Publish:
@@ -188,54 +236,17 @@ func (r *Realm) handleSession(sess *Session) {
 			case *Yield:
 				errMsg.Request = msg.Request
 			}
-			if err != nil {
+
+			if authErr != nil {
 				errMsg.Error = ErrAuthorizationFailed
-				log.Printf("[%s] authorization failed: %v", sess, err)
+				log.Printf("[%s] authorization failed: %v", sess, authErr)
 			} else {
 				errMsg.Error = ErrNotAuthorized
 				log.Printf("[%s] %s UNAUTHORIZED", sess, msg.MessageType())
 			}
+
+			// send error
 			logErr(sess.Send(errMsg))
-			continue
-		}
-
-		r.Interceptor.Intercept(sess, &msg)
-
-		switch msg := msg.(type) {
-		case *Goodbye:
-			logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
-			log.Printf("[%s] leaving: %v", sess, msg.Reason)
-			return
-
-		// Broker messages
-		case *Publish:
-			r.Broker.Publish(sess, msg)
-		case *Subscribe:
-			r.Broker.Subscribe(sess, msg)
-		case *Unsubscribe:
-			r.Broker.Unsubscribe(sess, msg)
-
-		// Dealer messages
-		case *Register:
-			r.Dealer.Register(sess, msg)
-		case *Unregister:
-			r.Dealer.Unregister(sess, msg)
-		case *Call:
-			r.Dealer.Call(sess, msg)
-		case *Yield:
-			r.Dealer.Yield(sess, msg)
-
-		// Error messages
-		case *Error:
-			if msg.Type == MessageTypeInvocation {
-				// the only type of ERROR message the router should receive
-				r.Dealer.Error(sess, msg)
-			} else {
-				log.Printf("invalid ERROR message received: %v", msg)
-			}
-
-		default:
-			log.Println("Unhandled message:", msg.MessageType())
 		}
 	}
 
@@ -278,7 +289,7 @@ func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcom
 // Authenticate either authenticates a client or returns a challenge message if
 // challenge/response authentication is to be used.
 func (r *Realm) authenticate(details map[string]interface{}) (Message, error) {
-	log.Println("details:", details)
+	log.Println("[realm] authenticate() details:", details)
 	if len(r.Authenticators) == 0 && len(r.CRAuthenticators) == 0 {
 		return &Welcome{}, nil
 	}

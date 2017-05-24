@@ -22,7 +22,9 @@ func TestJSONDeserialize(t *testing.T) {
 	tests := []test{
 		{
 			`[1,"some.realm",{}]`,
-			&Hello{"some.realm", make(map[string]interface{})},
+			&Hello{
+				Realm:   "some.realm",
+				Details: make(map[string]interface{})},
 			2,
 		},
 	}
@@ -93,21 +95,26 @@ func TestToList(t *testing.T) {
 		msg    string
 	}
 	tests := []test{
-		{[]interface{}{1}, map[string]interface{}{"a": nil}, 0, "default case"},
-		{nil, map[string]interface{}{"a": nil}, 0, "nil args, non-empty kwArgs"},
-		{[]interface{}{}, map[string]interface{}{"a": nil}, 0, "empty args, non-empty kwArgs"},
-		{[]interface{}{1}, nil, 1, "non-empty args, nil kwArgs"},
-		{[]interface{}{1}, make(map[string]interface{}), 1, "non-empty args, empty kwArgs"},
-		{[]interface{}{}, make(map[string]interface{}), 2, "empty args, empty kwArgs"},
-		{nil, nil, 2, "nil args, nil kwArgs"},
+		{[]interface{}{1}, map[string]interface{}{"a": nil}, 1, "default case"},
+		{nil, map[string]interface{}{"a": nil}, 1, "nil args, non-empty kwArgs"},
+		{[]interface{}{}, map[string]interface{}{"a": nil}, 1, "empty args, non-empty kwArgs"},
+		{[]interface{}{1}, nil, 2, "non-empty args, nil kwArgs"},
+		{[]interface{}{1}, make(map[string]interface{}), 2, "non-empty args, empty kwArgs"},
+		{[]interface{}{}, make(map[string]interface{}), 3, "empty args, empty kwArgs"},
+		{nil, nil, 3, "nil args, nil kwArgs"},
 	}
 
 	for _, tst := range tests {
-		msg := &Event{0, 0, nil, tst.args, tst.kwArgs}
+		msg := &Event{
+			Subscription: 0,
+			Publication:  0,
+			Details:      nil,
+			Arguments:    tst.args,
+			ArgumentsKw:  tst.kwArgs}
 		// +1 to account for the message type
 		numField := reflect.ValueOf(msg).Elem().NumField() + 1
 		exp := numField - tst.omit
-		if l := len(toList(msg)); l != exp {
+		if l := len(msg.ToPayload()); l != exp {
 			t.Errorf("Incorrect number of fields: %d != %d: %s", l, exp, tst.msg)
 		}
 	}

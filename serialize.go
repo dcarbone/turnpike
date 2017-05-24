@@ -4,10 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"reflect"
-	"strings"
-
 	"github.com/ugorji/go/codec"
+	"reflect"
 )
 
 // SerializationFormat indicates the data serialization format used in a WAMP session
@@ -122,29 +120,6 @@ type Serializer interface {
 	Deserialize([]byte) (Message, error)
 }
 
-// convert the message into a list of values, omitting trailing empty values
-func toList(msg Message) []interface{} {
-	val := reflect.ValueOf(msg)
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-
-	// iterate backwards until a non-empty or non-"omitempty" field is found
-	last := val.Type().NumField() - 1
-	for ; last > 0; last-- {
-		tag := val.Type().Field(last).Tag.Get("wamp")
-		if !strings.Contains(tag, "omitempty") || val.Field(last).Len() > 0 {
-			break
-		}
-	}
-
-	ret := []interface{}{int(msg.MessageType())}
-	for i := 0; i <= last; i++ {
-		ret = append(ret, val.Field(i).Interface())
-	}
-	return ret
-}
-
 // MessagePackSerializer is an implementation of Serializer that handles
 // serializing and deserializing msgpack encoded payloads.
 type MessagePackSerializer struct {
@@ -153,7 +128,7 @@ type MessagePackSerializer struct {
 // Serialize encodes a Message into a msgpack payload.
 func (s *MessagePackSerializer) Serialize(msg Message) ([]byte, error) {
 	var b []byte
-	return b, codec.NewEncoderBytes(&b, new(codec.MsgpackHandle)).Encode(toList(msg))
+	return b, codec.NewEncoderBytes(&b, new(codec.MsgpackHandle)).Encode(msg.ToPayload())
 }
 
 // Deserialize decodes a msgpack payload into a Message.
@@ -186,7 +161,7 @@ type JSONSerializer struct {
 // but instead uses the default implementation in encoding/json.
 // Use the BinaryData type in your structures if using binary data.
 func (s *JSONSerializer) Serialize(msg Message) ([]byte, error) {
-	return json.Marshal(toList(msg))
+	return json.Marshal(msg.ToPayload())
 }
 
 // Deserialize unmarshals the payload into a message.

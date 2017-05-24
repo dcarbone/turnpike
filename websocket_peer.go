@@ -180,16 +180,10 @@ func (p *webSocketPeer) read() {
 
 func (p *webSocketPeer) write() {
 	for msg := range p.out {
-		b, err := p.serializer.Serialize(msg)
-		if nil != err {
+		if b, err := p.serializer.Serialize(msg); nil != err {
 			log.Printf("Unable to serialize message: %s; Message: \"%v\"", err, msg)
 			go p.Close()
-
-			continue
-		}
-
-		err = p.conn.WriteMessage(p.payloadType, b)
-		if nil != err {
+		} else if err = p.conn.WriteMessage(p.payloadType, b); nil != err {
 			log.Printf("Unable to write message to connection: %s; Message: \"%v\"", err, msg)
 			p.hardClose()
 		} else if MessageTypeAbort == msg.MessageType() {

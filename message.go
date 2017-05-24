@@ -21,7 +21,10 @@ type (
 
 	// Message is a generic container for a WAMP message.
 	Message interface {
+		sync.Locker
+
 		MessageType() MessageType
+		ToPayload() []interface{}
 	}
 
 	// ExtensionMessage is a generic container for WAMP message extensions
@@ -261,6 +264,7 @@ func NewExtensionMessage(mt MessageType) (ExtensionMessage, error) {
 
 // [HELLO, Realm|uri, Details|dict]
 type Hello struct {
+	sync.Mutex
 	Realm   URI
 	Details map[string]interface{}
 }
@@ -269,8 +273,13 @@ func (msg *Hello) MessageType() MessageType {
 	return MessageTypeHello
 }
 
+func (msg *Hello) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Realm, msg.Details}
+}
+
 // [WELCOME, Session|id, Details|dict]
 type Welcome struct {
+	sync.Mutex
 	Id      ID
 	Details map[string]interface{}
 }
@@ -279,8 +288,13 @@ func (msg *Welcome) MessageType() MessageType {
 	return MessageTypeWelcome
 }
 
+func (msg *Welcome) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Id, msg.Details}
+}
+
 // [ABORT, Details|dict, Reason|uri]
 type Abort struct {
+	sync.Mutex
 	Details map[string]interface{}
 	Reason  URI
 }
@@ -289,8 +303,13 @@ func (msg *Abort) MessageType() MessageType {
 	return MessageTypeAbort
 }
 
+func (msg *Abort) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Details, msg.Reason}
+}
+
 // [CHALLENGE, AuthMethod|string, Extra|dict]
 type Challenge struct {
+	sync.Mutex
 	AuthMethod string
 	Extra      map[string]interface{}
 }
@@ -299,8 +318,13 @@ func (msg *Challenge) MessageType() MessageType {
 	return MessageTypeChallenge
 }
 
+func (msg *Challenge) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.AuthMethod, msg.Extra}
+}
+
 // [AUTHENTICATE, Signature|string, Extra|dict]
 type Authenticate struct {
+	sync.Mutex
 	Signature string
 	Extra     map[string]interface{}
 }
@@ -309,8 +333,13 @@ func (msg *Authenticate) MessageType() MessageType {
 	return MessageTypeAuthenticate
 }
 
+func (msg *Authenticate) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Signature, msg.Extra}
+}
+
 // [GOODBYE, Details|dict, Reason|uri]
 type Goodbye struct {
+	sync.Mutex
 	Details map[string]interface{}
 	Reason  URI
 }
@@ -319,10 +348,15 @@ func (msg *Goodbye) MessageType() MessageType {
 	return MessageTypeGoodbye
 }
 
+func (msg *Goodbye) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Details, msg.Reason}
+}
+
 // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri]
 // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list]
 // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list, ArgumentsKw|dict]
 type Error struct {
+	sync.Mutex
 	Type        MessageType
 	Request     ID
 	Details     map[string]interface{}
@@ -335,6 +369,16 @@ func (msg *Error) MessageType() MessageType {
 	return MessageTypeError
 }
 
+func (msg *Error) ToPayload() []interface{} {
+	p := []interface{}{msg.MessageType(), msg.Type, msg.Details, msg.Details, msg.Error}
+	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
+		p = append(p, msg.Arguments, msg.ArgumentsKw)
+	} else if nil != msg.Arguments && 0 < len(msg.Arguments) {
+		p = append(p, msg.Arguments)
+	}
+	return p
+}
+
 // [PUBLISH, Request|id, Options|dict, Topic|uri]
 // [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list]
 // [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list, ArgumentsKw|dict]
@@ -344,83 +388,130 @@ type Publish struct {
 	Topic       URI
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
+	sync.Mutex  `json:"-"`
 }
 
 func (msg *Publish) MessageType() MessageType {
 	return MessageTypePublish
 }
 
+func (msg *Publish) ToPayload() []interface{} {
+	p := []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Topic}
+	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
+		p = append(p, msg.Arguments, msg.ArgumentsKw)
+	} else if nil != msg.Arguments && 0 < len(msg.Arguments) {
+		p = append(p, msg.Arguments)
+	}
+	return p
+}
+
 // [PUBLISHED, PUBLISH.Request|id, Publication|id]
 type Published struct {
 	Request     ID
 	Publication ID
+	sync.Mutex  `json:"-"`
 }
 
 func (msg *Published) MessageType() MessageType {
 	return MessageTypePublished
 }
 
+func (msg *Published) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Publication}
+}
+
 // [SUBSCRIBE, Request|id, Options|dict, Topic|uri]
 type Subscribe struct {
-	Request ID
-	Options map[string]interface{}
-	Topic   URI
+	Request    ID
+	Options    map[string]interface{}
+	Topic      URI
+	sync.Mutex `json:"-"`
 }
 
 func (msg *Subscribe) MessageType() MessageType {
 	return MessageTypeSubscribe
 }
 
+func (msg *Subscribe) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Topic}
+}
+
 // [SUBSCRIBED, SUBSCRIBE.Request|id, Subscription|id]
 type Subscribed struct {
 	Request      ID
 	Subscription ID
+	sync.Mutex   `json:"-"`
 }
 
 func (msg *Subscribed) MessageType() MessageType {
 	return MessageTypeSubscribed
 }
 
+func (msg *Subscribed) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Subscription}
+}
+
 // [UNSUBSCRIBE, Request|id, SUBSCRIBED.Subscription|id]
 type Unsubscribe struct {
 	Request      ID
 	Subscription ID
+	sync.Mutex   `json:"-"`
 }
 
 func (msg *Unsubscribe) MessageType() MessageType {
 	return MessageTypeUnsubscribe
 }
 
+func (msg *Unsubscribe) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Subscription}
+}
+
 // [UNSUBSCRIBED, UNSUBSCRIBE.Request|id]
 type Unsubscribed struct {
-	Request ID
+	Request    ID
+	sync.Mutex `json:"-"`
 }
 
 func (msg *Unsubscribed) MessageType() MessageType {
 	return MessageTypeUnsubscribed
 }
 
+func (msg *Unsubscribed) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request}
+}
+
 // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict]
 // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list]
-// [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list,
-//     PUBLISH.ArgumentsKw|dict]
+// [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list, PUBLISH.ArgumentsKw|dict]
 type Event struct {
 	Subscription ID
 	Publication  ID
 	Details      map[string]interface{}
 	Arguments    []interface{}          `wamp:"omitempty"`
 	ArgumentsKw  map[string]interface{} `wamp:"omitempty"`
+	sync.Mutex   `json:"-"`
 }
 
 func (msg *Event) MessageType() MessageType {
 	return MessageTypeEvent
 }
 
+func (msg *Event) ToPayload() []interface{} {
+	p := []interface{}{msg.MessageType(), msg.Subscription, msg.Publication, msg.Details}
+	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
+		p = append(p, msg.Arguments, msg.ArgumentsKw)
+	} else if nil != msg.Arguments && 0 < len(msg.Arguments) {
+		p = append(p, msg.Arguments)
+	}
+	return p
+}
+
 // CallResult represents the result of a CALL.
 type CallResult struct {
-	Args   []interface{}
-	Kwargs map[string]interface{}
-	Err    URI
+	Args       []interface{}
+	Kwargs     map[string]interface{}
+	Err        URI
+	sync.Mutex `json:"-"`
 }
 
 // [CALL, Request|id, Options|dict, Procedure|uri]
@@ -432,10 +523,21 @@ type Call struct {
 	Procedure   URI
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
+	sync.Mutex  `json:"-"`
 }
 
 func (msg *Call) MessageType() MessageType {
 	return MessageTypeCall
+}
+
+func (msg *Call) ToPayload() []interface{} {
+	p := []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Procedure}
+	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
+		p = append(p, msg.Arguments, msg.ArgumentsKw)
+	} else if nil != msg.Arguments && 0 < len(msg.Arguments) {
+		p = append(p, msg.Arguments)
+	}
+	return p
 }
 
 // [RESULT, CALL.Request|id, Details|dict]
@@ -446,50 +548,81 @@ type Result struct {
 	Details     map[string]interface{}
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
+	sync.Mutex  `json:"-"`
 }
 
 func (msg *Result) MessageType() MessageType {
 	return MessageTypeResult
 }
 
+func (msg *Result) ToPayload() []interface{} {
+	p := []interface{}{msg.MessageType(), msg.Details}
+	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
+		p = append(p, msg.Arguments, msg.ArgumentsKw)
+	} else if nil != msg.Arguments && 0 < len(msg.Arguments) {
+		p = append(p, msg.Arguments)
+	}
+	return p
+}
+
 // [REGISTER, Request|id, Options|dict, Procedure|uri]
 type Register struct {
-	Request   ID
-	Options   map[string]interface{}
-	Procedure URI
+	Request    ID
+	Options    map[string]interface{}
+	Procedure  URI
+	sync.Mutex `json:"-"`
 }
 
 func (msg *Register) MessageType() MessageType {
 	return MessageTypeRegister
 }
 
+func (msg *Register) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Procedure}
+}
+
 // [REGISTERED, REGISTER.Request|id, Registration|id]
 type Registered struct {
 	Request      ID
 	Registration ID
+	sync.Mutex   `json:"-"`
 }
 
 func (msg *Registered) MessageType() MessageType {
 	return MessageTypeRegistered
 }
 
+func (msg *Registered) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Registration}
+}
+
 // [UNREGISTER, Request|id, REGISTERED.Registration|id]
 type Unregister struct {
 	Request      ID
 	Registration ID
+	sync.Mutex   `json:"-"`
 }
 
 func (msg *Unregister) MessageType() MessageType {
 	return MessageTypeUnregister
 }
 
+func (msg *Unregister) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Registration}
+}
+
 // [UNREGISTERED, UNREGISTER.Request|id]
 type Unregistered struct {
-	Request ID
+	Request    ID
+	sync.Mutex `json:"-"`
 }
 
 func (msg *Unregistered) MessageType() MessageType {
 	return MessageTypeUnregistered
+}
+
+func (msg *Unregistered) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request}
 }
 
 // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict]
@@ -501,10 +634,21 @@ type Invocation struct {
 	Details      map[string]interface{}
 	Arguments    []interface{}          `wamp:"omitempty"`
 	ArgumentsKw  map[string]interface{} `wamp:"omitempty"`
+	sync.Mutex   `json:"-"`
 }
 
 func (msg *Invocation) MessageType() MessageType {
 	return MessageTypeInvocation
+}
+
+func (msg *Invocation) ToPayload() []interface{} {
+	p := []interface{}{msg.MessageType(), msg.Request, msg.Registration, msg.Details}
+	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
+		p = append(p, msg.Arguments, msg.ArgumentsKw)
+	} else if nil != msg.Arguments && 0 < len(msg.Arguments) {
+		p = append(p, msg.Arguments)
+	}
+	return p
 }
 
 // [YIELD, INVOCATION.Request|id, Options|dict]
@@ -515,28 +659,49 @@ type Yield struct {
 	Options     map[string]interface{}
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
+	sync.Mutex  `json:"-"`
 }
 
 func (msg *Yield) MessageType() MessageType {
 	return MessageTypeYield
 }
 
+func (msg *Yield) ToPayload() []interface{} {
+	p := []interface{}{msg.MessageType(), msg.Request, msg.Options}
+	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
+		p = append(p, msg.Arguments, msg.ArgumentsKw)
+	} else if nil != msg.Arguments && 0 < len(msg.Arguments) {
+		p = append(p, msg.Arguments)
+	}
+	return p
+}
+
 // [CANCEL, CALL.Request|id, Options|dict]
 type Cancel struct {
-	Request ID
-	Options map[string]interface{}
+	Request    ID
+	Options    map[string]interface{}
+	sync.Mutex `json:"-"`
 }
 
 func (msg *Cancel) MessageType() MessageType {
 	return MessageTypeCancel
 }
 
+func (msg *Cancel) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Options}
+}
+
 // [INTERRUPT, INVOCATION.Request|id, Options|dict]
 type Interrupt struct {
-	Request ID
-	Options map[string]interface{}
+	Request    ID
+	Options    map[string]interface{}
+	sync.Mutex `json:"-"`
 }
 
 func (msg *Interrupt) MessageType() MessageType {
 	return MessageTypeInterrupt
+}
+
+func (msg *Interrupt) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.Request, msg.Options}
 }
