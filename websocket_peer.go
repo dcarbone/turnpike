@@ -3,7 +3,6 @@ package turnpike
 import (
 	"context"
 	"crypto/tls"
-	"errors"
 	"fmt"
 	"github.com/dcarbone/turnpike/message"
 	"github.com/gorilla/websocket"
@@ -137,7 +136,7 @@ func (p *webSocketPeer) Close() error {
 	}
 	if p.conn == nil {
 		p.mu.Unlock()
-		return errors.New("there is no socket to close")
+		return nil
 	}
 
 	// mark closed, localize conn, close chans
@@ -167,7 +166,7 @@ func (p *webSocketPeer) ReceiveUntil(ctx context.Context) (message.Message, erro
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
-		return nil, errors.New("peer is closed")
+		return nil, errPeerClosed{}
 	}
 	pack := p.packetPool.Get()
 	pack.ctx = ctx
@@ -192,7 +191,7 @@ func (p *webSocketPeer) SendAsync(ctx context.Context, msg message.Message, errC
 		errChan = make(chan error, 1)
 	}
 	if p.closed {
-		errChan <- errors.New("peer is closed")
+		errChan <- errPeerClosed{}
 		p.mu.Unlock()
 		return errChan
 	}
@@ -225,7 +224,7 @@ func (p *webSocketPeer) read() {
 		// lock while checking for closed...
 		if p.closed {
 			p.mu.Unlock()
-			pack.err = errors.New("peer is closed")
+			pack.err = errPeerClosed{}
 			goto finish
 		}
 
@@ -236,15 +235,15 @@ func (p *webSocketPeer) read() {
 		p.mu.Unlock()
 
 		if err = pack.ctx.Err(); err != nil {
-			pack.err = &errMessageContextFinished{err}
+			pack.err = errMessageContextFinished{err}
 		} else if msgType, b, err = conn.ReadMessage(); err != nil {
-			pack.err = &errSocketRead{err}
+			pack.err = errSocketRead{err}
 			closePeer = true
 		} else if msgType == websocket.CloseMessage {
 			log.Printf("Close message: %s", string(b))
 			closePeer = true
 		} else if msg, err = serializer.Deserialize(b); err != nil {
-			pack.err = &errMessageDeserialize{err}
+			pack.err = errMessageDeserialize{err}
 		} else {
 			pack.msg = msg
 		}
@@ -275,7 +274,7 @@ func (p *webSocketPeer) write() {
 		// lock while checking for closed...
 		if p.closed {
 			p.mu.Unlock()
-			pack.err = &errPeerClosed{}
+			pack.err = errPeerClosed{}
 			goto finish
 		}
 
@@ -289,11 +288,11 @@ func (p *webSocketPeer) write() {
 		if err = pack.ctx.Err(); err != nil {
 			pack.err = &errMessageContextFinished{pack.ctx.Err()}
 		} else if pack.msg == nil {
-			pack.err = &errMessageIsNil{}
+			pack.err = errMessageIsNil{}
 		} else if b, err = serializer.Serialize(pack.msg); err != nil {
-			pack.err = &errMessageSerialize{err}
+			pack.err = errMessageSerialize{err}
 		} else if err = conn.WriteMessage(msgType, b); err != nil {
-			pack.err = &errSocketWrite{err}
+			pack.err = errSocketWrite{err}
 			closePeer = true
 		} else if pack.msg.MessageType() == message.TypeAbort {
 			closePeer = true

@@ -44,11 +44,6 @@ type errSocketRead struct{ err error }
 func (e errSocketRead) Error() string { return fmt.Sprintf("socket read error: %s", e.err.Error()) }
 func (errSocketRead) Terminal() bool  { return true }
 
-type errAbort struct{}
-
-func (errAbort) Error() string  { return "connection aborted" }
-func (errAbort) Terminal() bool { return true }
-
 // TODO: use later.
 //type MultiError struct {
 //	mu       sync.Mutex
