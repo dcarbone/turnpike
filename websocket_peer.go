@@ -3,25 +3,70 @@ package turnpike
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
+	"github.com/dcarbone/turnpike/message"
 	"github.com/gorilla/websocket"
 	"sync"
 	"time"
 )
 
+// TODO: be smarter and combine msg and b
+type packet struct {
+	ctx  context.Context
+	msg  message.Message
+	err  error
+	done chan *packet
+}
+
+func (pack *packet) finish() {
+	select {
+	case pack.done <- pack:
+	default:
+		// discard
+	}
+}
+
+type packetPool struct {
+	*sync.Pool
+}
+
+func newPacketPool() *packetPool {
+	pp := &packetPool{
+		Pool: new(sync.Pool),
+	}
+	pp.Pool.New = pp.New
+	return pp
+}
+
+func (pp *packetPool) Get() *packet {
+	pack := pp.Pool.Get().(*packet)
+	pack.msg = nil
+	pack.err = nil
+	pack.ctx = nil
+	pack.done = make(chan *packet, 1) // TODO: clean up old chan, if necessary...
+	return pack
+}
+
+func (pp *packetPool) New() interface{} {
+	pack := packet{
+		done: make(chan *packet, 1),
+	}
+	return &pack
+}
+
 type webSocketPeer struct {
-	ctx context.Context
+	mu sync.Mutex
 
-	conn *websocket.Conn
+	conn   *websocket.Conn
+	closed bool
 
-	closed     bool
-	closedLock sync.RWMutex
+	serializer Serializer
+	msgType    int
 
-	serializer  Serializer
-	payloadType int
-
-	in  chan Message
-	out chan Message
+	packetPool *packetPool
+	in         chan *packet
+	out        chan *packet
 }
 
 // TODO: Hate this.  Change.
@@ -40,7 +85,7 @@ func NewWebSocketPeer(serialization SerializationFormat, url string, tlscfg *tls
 		payloadType = websocket.BinaryMessage
 		protocol = WebSocketProtocolMSGPack
 	default:
-		return nil, fmt.Errorf("Unsupported serialization: %v", serialization)
+		return nil, fmt.Errorf("unsupported serialization: %v", serialization)
 	}
 
 	dialer := DefaultDialer([]string{string(protocol)}, tlscfg, dial)
@@ -53,14 +98,21 @@ func NewWebSocketPeer(serialization SerializationFormat, url string, tlscfg *tls
 	return NewPeer(serializer, payloadType, conn), nil
 }
 
-func NewPeer(serializer Serializer, payloadType int, conn *websocket.Conn) Peer {
+func NewPeer(serializer Serializer, msgType int, conn *websocket.Conn) Peer {
 	p := &webSocketPeer{
-		ctx:         context.Background(),
-		conn:        conn,
-		in:          make(chan Message, 100),
-		out:         make(chan Message, 100),
-		serializer:  serializer,
-		payloadType: payloadType,
+		conn:       conn,
+		serializer: serializer,
+		msgType:    msgType,
+		packetPool: newPacketPool(),
+		in:         make(chan *packet),
+		out:        make(chan *packet, 1000),
+	}
+
+	p.packetPool.New = func() interface{} {
+		pack := packet{
+			done: make(chan *packet),
+		}
+		return &pack
 	}
 
 	go p.read()
@@ -70,124 +122,190 @@ func NewPeer(serializer Serializer, payloadType int, conn *websocket.Conn) Peer 
 }
 
 func (p *webSocketPeer) Closed() bool {
-	p.closedLock.RLock()
-	defer p.closedLock.RUnlock()
-	return p.closed
+	p.mu.Lock()
+	b := p.closed
+	p.mu.Unlock()
+	return b
 }
 
 // Close will attempt to politely close the connection after sending a Goodbye message
 func (p *webSocketPeer) Close() error {
-	p.closedLock.Lock()
-	defer p.closedLock.Unlock()
-
-	// are we already closed?
+	p.mu.Lock()
 	if p.closed {
-		return fmt.Errorf("Peer is already closed")
+		p.mu.Unlock()
+		return nil
+	}
+	if p.conn == nil {
+		p.mu.Unlock()
+		return errors.New("there is no socket to close")
 	}
 
-	// set closed to true
+	// mark closed, localize conn, close chans
 	p.closed = true
+	conn := p.conn
+	close(p.in)
+	close(p.out)
 
+	p.mu.Unlock()
+
+	// try to be nice
 	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye")
-	err := p.conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(5*time.Second))
+	err := conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(5*time.Second))
 	if err != nil {
 		log.Printf("Unable to send \"Goodbye\": %s", err)
 	}
 
-	// close connection
-	err = p.conn.Close()
-	if nil != err {
-		return fmt.Errorf("Close() Error closing peer connection: %s", err)
-	}
-
-	return nil
+	// terminate!
+	return conn.Close()
 }
 
-// Receive returns the underlying "in" channel.  The closure of this channel indicates the peer is defunct.
-func (p *webSocketPeer) Receive() <-chan Message {
-	return p.in
+func (p *webSocketPeer) Receive() (message.Message, error) {
+	return p.ReceiveUntil(context.Background())
 }
 
-// Send will attempt to add a message to the "to be sent" channel.
-func (p *webSocketPeer) Send(msg Message) error {
-	p.closedLock.RLock()
-	defer p.closedLock.RUnlock()
-
+func (p *webSocketPeer) ReceiveUntil(ctx context.Context) (message.Message, error) {
+	p.mu.Lock()
 	if p.closed {
-		return fmt.Errorf("Peer is closed, cannot write \"%v\"", msg)
+		p.mu.Unlock()
+		return nil, errors.New("peer is closed")
 	}
-
-	select {
-	case p.out <- msg:
-		return nil
-	default:
-		go p.hardClose()
-		return fmt.Errorf("Peer out queue is full! Something is wrong.  Closing peer")
-	}
+	pack := p.packetPool.Get()
+	pack.ctx = ctx
+	in := p.in
+	p.mu.Unlock()
+	in <- pack
+	<-pack.done
+	msg, err := pack.msg, pack.err
+	p.packetPool.Put(pack)
+	return msg, err
 }
 
-func (p *webSocketPeer) hardClose() {
-	p.closedLock.Lock()
-	defer p.closedLock.Unlock()
+// Send will block until the send is attempted
+func (p *webSocketPeer) Send(ctx context.Context, msg message.Message) error {
+	return <-p.SendAsync(ctx, msg, nil)
+}
 
-	// if not already closed...
-	if !p.closed {
-		p.closed = true
-		close(p.in)
-		close(p.out)
-
-		err := p.conn.Close()
-		if nil != err {
-			log.Printf("hardClose() error closing peer connection: %s", err)
-		}
+// SendAsync will not block until the send is attempted.
+func (p *webSocketPeer) SendAsync(ctx context.Context, msg message.Message, errChan chan error) <-chan error {
+	p.mu.Lock()
+	if errChan == nil {
+		errChan = make(chan error, 1)
 	}
+	if p.closed {
+		errChan <- errors.New("peer is closed")
+		p.mu.Unlock()
+		return errChan
+	}
+	pack := p.packetPool.Get()
+	pack.msg = msg
+	pack.ctx = ctx
+	go func(pool *packetPool, pack *packet, out chan *packet) {
+		out <- pack
+		<-pack.done
+		errChan <- pack.err
+		pool.Put(pack)
+	}(p.packetPool, pack, p.out)
+	p.mu.Unlock()
+	return errChan
 }
 
 func (p *webSocketPeer) read() {
-	for {
-		// attempt to read message from connection
-		msgType, message, err := p.conn.ReadMessage()
+	var msgType int
+	var b []byte
+	var msg message.Message
+	var err error
+	var closePeer bool
 
-		// if errored...
-		if nil != err {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseNormalClosure) {
-				log.Printf("Error reading from peer conn: %s", err)
-			}
-			go p.hardClose()
-			return
+	for pack := range p.in {
+		p.mu.Lock()
+
+		// pre-read error checks
+		if p.closed {
+			p.mu.Unlock()
+			pack.err = errors.New("peer is closed")
+			pack.finish()
+			continue
+		} else if err = pack.ctx.Err(); err != nil {
+			p.mu.Unlock()
+			pack.err = err
+			pack.finish()
+			continue
 		}
 
-		if msgType == websocket.CloseMessage {
-			go p.hardClose()
-			return
-		}
+		p.mu.Unlock()
 
-		msg, err := p.serializer.Deserialize(message)
-		if nil != err {
-			log.Printf("Error deserializing message: %s", err)
+		if msgType, b, err = p.conn.ReadMessage(); err != nil {
+			pack.err = err
+			closePeer = true
+		} else if msgType == websocket.CloseMessage {
+			pack.err = errors.New("peer is closing")
+			closePeer = true
+		} else if msg, err = p.serializer.Deserialize(b); err != nil {
+			pack.err = err
 		} else {
-		TryPush:
-			select {
-			case p.in <- msg:
-			default:
-				dmsg := <-p.in
-				log.Printf("Peer in queue is full, nothing is reading from it.  Discarding message \"%v\"", dmsg)
-				goto TryPush
+			pack.msg = msg
+		}
+
+		if closePeer {
+			err = p.Close()
+			if err != nil {
+				// TODO: multi-error?
+				if pack.err == nil {
+					pack.err = err
+				}
 			}
 		}
+
+		pack.finish()
 	}
 }
 
 func (p *webSocketPeer) write() {
-	for msg := range p.out {
-		if b, err := p.serializer.Serialize(msg); nil != err {
-			log.Printf("Unable to serialize message: %s; Message: \"%v\"", err, msg)
-			go p.Close()
-		} else if err = p.conn.WriteMessage(p.payloadType, b); nil != err {
-			log.Printf("Unable to write message to connection: %s; Message: \"%v\"", err, msg)
-			p.hardClose()
-		} else if MessageTypeAbort == msg.MessageType() {
-			p.hardClose()
+	var conn *websocket.Conn
+	var serializer Serializer
+	var msgType int
+
+	var b []byte
+	var err error
+	var closePeer bool
+	for pack := range p.out {
+		p.mu.Lock()
+
+		// lock while checking for closed...
+		if p.closed {
+			p.mu.Unlock()
+			pack.err = &errPeerClosed{}
+			goto finish
 		}
+
+		// localize stuff...
+		conn = p.conn
+		serializer = p.serializer
+		msgType = p.msgType
+
+		p.mu.Unlock()
+
+		if err = pack.ctx.Err(); err != nil {
+			pack.err = &errMessageContextFinished{pack.ctx.Err()}
+		} else if pack.msg == nil {
+			pack.err = &errMessageIsNil{}
+		} else if b, err = serializer.Serialize(pack.msg); err != nil {
+			pack.err = &errMessageSerialize{err}
+		} else if err = conn.WriteMessage(msgType, b); err != nil {
+			pack.err = &errSocketWrite{err}
+			closePeer = true
+		} else if pack.msg.MessageType() == message.TypeAbort {
+			closePeer = true
+		}
+
+	finish:
+		if closePeer {
+			err = p.Close()
+			if err != nil {
+				log.Printf("Error closing socket: %s", err)
+			}
+		}
+
+		pack.finish()
 	}
 }

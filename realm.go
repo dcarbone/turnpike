@@ -29,10 +29,10 @@ type Realm struct {
 	AuthTimeout      time.Duration
 
 	sessions     map[ID]*Session
-	sessionsLock sync.RWMutex
+	sessionsLock sync.Mutex
 
 	closed     bool
-	closedLock sync.RWMutex
+	closedLock sync.Mutex
 
 	localClient
 }
@@ -76,8 +76,8 @@ func (r *Realm) init() {
 }
 
 func (r *Realm) Closed() bool {
-	r.closedLock.RLock()
-	defer r.closedLock.RUnlock()
+	r.closedLock.Lock()
+	defer r.closedLock.Lock()
 	return r.closed
 }
 
@@ -92,11 +92,11 @@ func (r *Realm) Close() {
 	r.closed = true
 	r.closedLock.Unlock()
 
-	r.sessionsLock.RLock()
+	r.sessionsLock.Lock()
 
 	// log when done
 	defer func(uri URI) {
-		r.sessionsLock.RUnlock()
+		r.sessionsLock.Lock()
 		log.Printf("Realm \"%s\" is now closed.", uri)
 	}(r.URI)
 
@@ -126,7 +126,7 @@ func (r *Realm) Close() {
 				// wait around for something to happen...
 				select {
 				case <-ctx.Done():
-					logErr(fmt.Errorf("Unable to close session \"%d\": %s", s.Id, ctx.Err()))
+					logErr(fmt.Errorf("unable to close session \"%d\": %s", s.Id, ctx.Err()))
 				case err := <-closeChan:
 					logErr(err)
 				}
@@ -152,14 +152,14 @@ func (l *localClient) onLeave(session ID) {
 }
 
 func (r *Realm) handleSession(sess *Session) {
-	r.closedLock.RLock()
+	r.closedLock.Lock()
 	if r.closed {
 		log.Printf("Will not handle session \"%d\" as realm \"%s\" is already closed", sess.Id, string(r.URI))
-		r.closedLock.RUnlock()
+		r.closedLock.Lock()
 		return
 	}
 
-	r.closedLock.RUnlock()
+	r.closedLock.Unlock()
 
 	r.sessionsLock.Lock()
 	r.sessions[sess.Id] = sess
@@ -296,19 +296,19 @@ func (r *Realm) authenticate(details map[string]interface{}) (Message, error) {
 	// TODO: this might not always be a []interface{}. Using the JSON unmarshaller it will be,
 	// but we may have serializations that preserve more of the original type.
 	// For now, the tests just explicitly send a []interface{}
-	_authmethods, ok := details["authmethods"].([]interface{})
+	incomingAuthMethods, ok := details["authmethods"].([]interface{})
 	if !ok {
-		return nil, fmt.Errorf("No authentication supplied")
+		return nil, fmt.Errorf("no authentication supplied")
 	}
-	authmethods := []string{}
-	for _, method := range _authmethods {
+	authMethods := []string{}
+	for _, method := range incomingAuthMethods {
 		if m, ok := method.(string); ok {
-			authmethods = append(authmethods, m)
+			authMethods = append(authMethods, m)
 		} else {
 			log.Printf("invalid authmethod value: %v", method)
 		}
 	}
-	for _, method := range authmethods {
+	for _, method := range authMethods {
 		if auth, ok := r.CRAuthenticators[method]; ok {
 			if challenge, err := auth.Challenge(details); err != nil {
 				return nil, err

@@ -1,0 +1,3 @@
+[[constraint]]
+  name = "github.com/gorilla/websocket"
+  version = "v1.2.*"

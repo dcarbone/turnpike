@@ -22,7 +22,7 @@ func TestJSONDeserialize(t *testing.T) {
 	tests := []test{
 		{
 			`[1,"some.realm",{}]`,
-			&Hello{
+			&HelloMessage{
 				Realm:   "some.realm",
 				Details: make(map[string]interface{})},
 			2,

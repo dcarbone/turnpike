@@ -192,7 +192,7 @@ func (r *defaultRouter) Accept(peer Peer) error {
 	}
 	log.Printf("%s: %+v", msg.MessageType(), msg)
 
-	hello, ok := msg.(*Hello)
+	hello, ok := msg.(*HelloMessage)
 	if !ok {
 		logErr(peer.Send(&Abort{Reason: URI("wamp.error.protocol_violation")}))
 		return fmt.Errorf("protocol violation: expected HELLO, received %s", msg.MessageType())
@@ -217,7 +217,7 @@ func (r *defaultRouter) Accept(peer Peer) error {
 		return AuthenticationError(err.Error())
 	}
 
-	welcome.Id = NewID()
+	welcome.ID = NewID()
 
 	if welcome.Details == nil {
 		welcome.Details = make(map[string]interface{})
@@ -231,14 +231,14 @@ func (r *defaultRouter) Accept(peer Peer) error {
 	if err := peer.Send(welcome); err != nil {
 		return err
 	}
-	log.Println("Established session:", welcome.Id)
+	log.Println("Established session:", welcome.ID)
 
 	// session details
-	welcome.Details["session"] = welcome.Id
+	welcome.Details["session"] = welcome.ID
 	welcome.Details["realm"] = hello.Realm
 	sess := &Session{
 		Peer:    peer,
-		Id:      welcome.Id,
+		Id:      welcome.ID,
 		Details: welcome.Details,
 	}
 	r.sessionOpenCallbacksLock.RLock()

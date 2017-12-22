@@ -34,7 +34,7 @@ func TestWSHandshakeJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client.Send(&Hello{Realm: testRealm})
+	client.Send(&HelloMessage{Realm: testRealm})
 	go r.Accept(client)
 
 	if msg, ok := <-client.Receive(); !ok {
@@ -53,7 +53,7 @@ func TestWSHandshakeMsgpack(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	client.Send(&Hello{Realm: testRealm})
+	client.Send(&HelloMessage{Realm: testRealm})
 	go r.Accept(client)
 
 	if msg, ok := <-client.Receive(); !ok {

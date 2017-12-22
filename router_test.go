@@ -28,7 +28,7 @@ func basicConnect(t *testing.T, client *basicPeer, server Peer) Router {
 	r := NewDefaultRouter()
 	r.RegisterRealm(&Realm{URI: testRealm})
 
-	client.Send(&Hello{Realm: testRealm})
+	client.Send(&HelloMessage{Realm: testRealm})
 	if err := r.Accept(server); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestInvalidRealm(t *testing.T) {
 	c, server := localPipe()
 
 	client := &basicPeer{c}
-	client.Send(&Hello{Realm: "does.not.exist"})
+	client.Send(&HelloMessage{Realm: "does.not.exist"})
 	err := r.Accept(server)
 	if err == nil {
 		t.Error(err)
@@ -164,7 +164,7 @@ func TestRouterSubscribe(t *testing.T) {
 
 	pubClient, pubServer := localPipe()
 	pub := &basicPeer{pubClient}
-	pub.Send(&Hello{Realm: testRealm})
+	pub.Send(&HelloMessage{Realm: testRealm})
 	if err := r.Accept(&basicPeer{pubServer}); err != nil {
 		t.Fatal("Error pubing publisher")
 	}
@@ -213,7 +213,7 @@ func TestRouterCall(t *testing.T) {
 
 	callerClient, callerServer := localPipe()
 	caller := &basicPeer{callerClient}
-	caller.Send(&Hello{Realm: testRealm})
+	caller.Send(&HelloMessage{Realm: testRealm})
 	if err := r.Accept(&basicPeer{callerServer}); err != nil {
 		t.Fatal("Error connecting caller")
 	}

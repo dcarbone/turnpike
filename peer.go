@@ -1,8 +1,7 @@
 package turnpike
 
 import (
-	"fmt"
-	"time"
+	"context"
 )
 
 // A Sender can send a message to its peer.
@@ -11,10 +10,12 @@ import (
 // this sends a message to the client.
 type Sender interface {
 	// Send a message to the peer
-	Send(Message) error
+	Send(context.Context, Message) error
+	SendAsync(context.Context, Message, chan error) <-chan error
 }
 
 // Peer is the interface that must be implemented by all WAMP peers.
+// It must be a single in, multi-out writer.
 type Peer interface {
 	Sender
 
@@ -23,20 +24,8 @@ type Peer interface {
 	Close() error
 	Closed() bool
 
-	// Receive returns a channel of messages coming from the peer.
-	Receive() <-chan Message
-}
-
-// GetMessageTimeout is a convenience function to get a single message from a
-// peer within a specified period of time
-func GetMessageTimeout(p Peer, t time.Duration) (Message, error) {
-	select {
-	case msg, open := <-p.Receive():
-		if !open {
-			return nil, fmt.Errorf("receive channel closed")
-		}
-		return msg, nil
-	case <-time.After(t):
-		return nil, fmt.Errorf("timeout waiting for message")
-	}
+	// Receive will wait
+	Receive() (Message, error)
+	// ReceiveUntil will attempt to return a message if the provided context is not done'd prior to message retrieval.
+	ReceiveUntil(context.Context) (Message, error)
 }

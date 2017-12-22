@@ -1,8 +1,6 @@
-package turnpike
+package message
 
 import (
-	"fmt"
-	"reflect"
 	"sync"
 )
 
@@ -16,339 +14,272 @@ type (
 	// An ID is a unique, non-negative number. Different uses may have additional restrictions.
 	ID uint64
 
-	// constants sourced from: http://wamp-proto.org/static/rfc/draft-oberstet-hybi-crossbar-wamp.html#rfc.section.6.5
-	MessageType int
+	// Type values sourced from: http://wamp-proto.org/static/rfc/draft-oberstet-hybi-crossbar-wamp.html#rfc.section.6.5
+	Type uint32
 
 	// Message is a generic container for a WAMP message.
 	Message interface {
-		sync.Locker
-
-		MessageType() MessageType
+		MessageType() Type
 		ToPayload() []interface{}
 	}
 
-	// ExtensionMessage is a generic container for WAMP message extensions
-	ExtensionMessage interface {
+	// Extension is a generic container for WAMP message extensions
+	Extension interface {
 		Message
-
-		MessageTypeName() string
+		TypeName() string
 	}
+
+	// ExtensionProviderFunc defines a function that will be called whenever a custom message is seen.
+	ExtensionProviderFunc func(Type, ...interface{}) Extension
 )
 
 var (
-	extensions     = map[MessageType]ExtensionMessage{}
-	extensionsLock = sync.RWMutex{}
+	extensions = new(sync.Map)
 )
 
 const (
-	MessageTypeHello        MessageType = 1
-	MessageTypeWelcome      MessageType = 2
-	MessageTypeAbort        MessageType = 3
-	MessageTypeChallenge    MessageType = 4
-	MessageTypeAuthenticate MessageType = 5
-	MessageTypeGoodbye      MessageType = 6
-	MessageTypeError        MessageType = 8
+	TypeHello        Type = 1
+	TypeWelcome      Type = 2
+	TypeAbort        Type = 3
+	TypeChallenge    Type = 4
+	TypeAuthenticate Type = 5
+	TypeGoodbye      Type = 6
+	TypeError        Type = 8
+	TypePublish      Type = 16
+	TypePublished    Type = 17
+	TypeSubscribe    Type = 32
+	TypeSubscribed   Type = 33
+	TypeUnsubscribe  Type = 34
+	TypeUnsubscribed Type = 35
+	TypeEvent        Type = 36
+	TypeCall         Type = 48
+	TypeCancel       Type = 49
+	TypeResult       Type = 50
+	TypeRegister     Type = 64
+	TypeRegistered   Type = 65
+	TypeUnregister   Type = 66
+	TypeUnregistered Type = 67
+	TypeInvocation   Type = 68
+	TypeInterrupt    Type = 69
+	TypeYield        Type = 70
 
-	MessageTypePublish   MessageType = 16
-	MessageTypePublished MessageType = 17
-
-	MessageTypeSubscribe    MessageType = 32
-	MessageTypeSubscribed   MessageType = 33
-	MessageTypeUnsubscribe  MessageType = 34
-	MessageTypeUnsubscribed MessageType = 35
-
-	MessageTypeEvent MessageType = 36
-
-	MessageTypeCall   MessageType = 48
-	MessageTypeCancel MessageType = 49
-	MessageTypeResult MessageType = 50
-
-	MessageTypeRegister     MessageType = 64
-	MessageTypeRegistered   MessageType = 65
-	MessageTypeUnregister   MessageType = 66
-	MessageTypeUnregistered MessageType = 67
-	MessageTypeInvocation   MessageType = 68
-	MessageTypeInterrupt    MessageType = 69
-	MessageTypeYield        MessageType = 70
-
-	MessageTypeExtensionMin MessageType = 256
-	MessageTypeExtensionMax MessageType = 1023
+	TypeExtensionMin Type = 256
+	TypeExtensionMax Type = 1023
 )
 
-func (mt MessageType) New() Message {
+func (mt Type) New() Message {
 	switch mt {
-	case MessageTypeHello:
+	case TypeHello:
 		return new(Hello)
-	case MessageTypeWelcome:
+	case TypeWelcome:
 		return new(Welcome)
-	case MessageTypeAbort:
+	case TypeAbort:
 		return new(Abort)
-	case MessageTypeChallenge:
+	case TypeChallenge:
 		return new(Challenge)
-	case MessageTypeAuthenticate:
+	case TypeAuthenticate:
 		return new(Authenticate)
-	case MessageTypeGoodbye:
+	case TypeGoodbye:
 		return new(Goodbye)
-	case MessageTypeError:
+	case TypeError:
 		return new(Error)
 
-	case MessageTypePublish:
+	case TypePublish:
 		return new(Publish)
-	case MessageTypePublished:
+	case TypePublished:
 		return new(Published)
 
-	case MessageTypeSubscribe:
+	case TypeSubscribe:
 		return new(Subscribe)
-	case MessageTypeSubscribed:
+	case TypeSubscribed:
 		return new(Subscribed)
-	case MessageTypeUnsubscribe:
+	case TypeUnsubscribe:
 		return new(Unsubscribe)
-	case MessageTypeUnsubscribed:
+	case TypeUnsubscribed:
 		return new(Unsubscribed)
-	case MessageTypeEvent:
+	case TypeEvent:
 		return new(Event)
 
-	case MessageTypeCall:
+	case TypeCall:
 		return new(Call)
-	case MessageTypeCancel:
+	case TypeCancel:
 		return new(Cancel)
-	case MessageTypeResult:
+	case TypeResult:
 		return new(Result)
 
-	case MessageTypeRegister:
+	case TypeRegister:
 		return new(Register)
-	case MessageTypeRegistered:
+	case TypeRegistered:
 		return new(Registered)
-	case MessageTypeUnregister:
+	case TypeUnregister:
 		return new(Unregister)
-	case MessageTypeUnregistered:
+	case TypeUnregistered:
 		return new(Unregistered)
-	case MessageTypeInvocation:
+	case TypeInvocation:
 		return new(Invocation)
-	case MessageTypeInterrupt:
+	case TypeInterrupt:
 		return new(Interrupt)
-	case MessageTypeYield:
+	case TypeYield:
 		return new(Yield)
-	default:
-		msg, err := NewExtensionMessage(mt)
-		if nil != err {
-			panic(err.Error())
+	}
+
+	if TypeExtensionMin <= mt && mt <= TypeExtensionMax {
+		if f, ok := extensions.Load(mt); ok {
+			return f.(ExtensionProviderFunc)(mt)
 		}
-		return msg
+		return nil
+	} else {
+		return nil
 	}
 }
 
-func (mt MessageType) String() string {
+func (mt Type) String() string {
 	switch mt {
-	case MessageTypeHello:
+	case TypeHello:
 		return "HELLO"
-	case MessageTypeWelcome:
+	case TypeWelcome:
 		return "WELCOME"
-	case MessageTypeAbort:
+	case TypeAbort:
 		return "ABORT"
-	case MessageTypeChallenge:
+	case TypeChallenge:
 		return "CHALLENGE"
-	case MessageTypeAuthenticate:
+	case TypeAuthenticate:
 		return "AUTHENTICATE"
-	case MessageTypeGoodbye:
+	case TypeGoodbye:
 		return "GOODBYE"
-	case MessageTypeError:
+	case TypeError:
 		return "ERROR"
 
-	case MessageTypePublish:
+	case TypePublish:
 		return "PUBLISH"
-	case MessageTypePublished:
+	case TypePublished:
 		return "PUBLISHED"
 
-	case MessageTypeSubscribe:
+	case TypeSubscribe:
 		return "SUBSCRIBE"
-	case MessageTypeSubscribed:
+	case TypeSubscribed:
 		return "SUBSCRIBED"
-	case MessageTypeUnsubscribe:
+	case TypeUnsubscribe:
 		return "UNSUBSCRIBE"
-	case MessageTypeUnsubscribed:
+	case TypeUnsubscribed:
 		return "UNSUBSCRIBED"
-	case MessageTypeEvent:
+	case TypeEvent:
 		return "EVENT"
 
-	case MessageTypeCall:
+	case TypeCall:
 		return "CALL"
-	case MessageTypeCancel:
+	case TypeCancel:
 		return "CANCEL"
-	case MessageTypeResult:
+	case TypeResult:
 		return "RESULT"
 
-	case MessageTypeRegister:
+	case TypeRegister:
 		return "REGISTER"
-	case MessageTypeRegistered:
+	case TypeRegistered:
 		return "REGISTERED"
-	case MessageTypeUnregister:
+	case TypeUnregister:
 		return "UNREGISTER"
-	case MessageTypeUnregistered:
+	case TypeUnregistered:
 		return "UNREGISTERED"
-	case MessageTypeInvocation:
+	case TypeInvocation:
 		return "INVOCATION"
-	case MessageTypeInterrupt:
+	case TypeInterrupt:
 		return "INTERRUPT"
-	case MessageTypeYield:
+	case TypeYield:
 		return "YIELD"
+	}
 
-	default:
-		msg, err := NewExtensionMessage(mt)
-		if nil != err {
-			panic(err.Error())
+	if TypeExtensionMin <= mt && mt <= TypeExtensionMax {
+		if f, ok := extensions.Load(mt); ok {
+			return f.(ExtensionProviderFunc)(mt).TypeName()
 		}
-		return msg.MessageTypeName()
+		return "UNKNOWN"
+	} else {
+		return "UNKNOWN"
 	}
-}
-
-// RegisterExtensionMessage allows you to specify a custom message type for use within your implementation.
-func RegisterExtensionMessage(mt MessageType, proto ExtensionMessage) error {
-
-	// TODO: This could probably be made MUCH simpler...
-
-	var protoType reflect.Type
-	var protoKind reflect.Kind
-
-	// validate type value
-	if mt < MessageTypeExtensionMin || mt > MessageTypeExtensionMax {
-		return fmt.Errorf(
-			"Extension Messages must have a Type value in range [%d...%d], %d provided",
-			MessageTypeExtensionMin,
-			MessageTypeExtensionMax,
-			mt)
-	}
-
-	// get type
-	protoType = reflect.TypeOf(proto)
-
-	// check for pointer
-	if protoKind == reflect.Ptr {
-		protoType = protoType.Elem()
-	}
-
-	// get kind
-	protoKind = protoType.Kind()
-
-	// only allow structs
-	if protoType.Kind() != reflect.Struct {
-		return fmt.Errorf("Message implementation must be struct, %s provided", protoType)
-	}
-
-	// lock map
-	extensionsLock.Lock()
-	defer extensionsLock.Unlock()
-
-	// create empty message
-	extensions[mt] = reflect.New(protoType).Interface().(ExtensionMessage)
-
-	return nil
-}
-
-// NewExtensionMessage will attempt to construct a new instance of an extension message type
-func NewExtensionMessage(mt MessageType) (ExtensionMessage, error) {
-	extensionsLock.RLock()
-	defer extensionsLock.RUnlock()
-
-	// has extension been defined?
-	proto, ok := extensions[mt]
-	if !ok {
-		return nil, fmt.Errorf("\"%d\" is not a registered message extension type", mt)
-	}
-
-	// create new message
-	msg := reflect.New(reflect.TypeOf(proto)).Interface().(ExtensionMessage)
-
-	return msg, nil
 }
 
 // [HELLO, Realm|uri, Details|dict]
 type Hello struct {
-	sync.Mutex
 	Realm   URI
 	Details map[string]interface{}
 }
 
-func (msg *Hello) MessageType() MessageType {
-	return MessageTypeHello
+func (Hello) MessageType() Type {
+	return TypeHello
 }
 
-func (msg *Hello) ToPayload() []interface{} {
+func (msg Hello) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Realm, msg.Details}
 }
 
 // [WELCOME, Session|id, Details|dict]
 type Welcome struct {
-	sync.Mutex
-	Id      ID
+	ID      ID
 	Details map[string]interface{}
 }
 
-func (msg *Welcome) MessageType() MessageType {
-	return MessageTypeWelcome
+func (Welcome) MessageType() Type {
+	return TypeWelcome
 }
 
-func (msg *Welcome) ToPayload() []interface{} {
-	return []interface{}{msg.MessageType(), msg.Id, msg.Details}
+func (msg Welcome) ToPayload() []interface{} {
+	return []interface{}{msg.MessageType(), msg.ID, msg.Details}
 }
 
 // [ABORT, Details|dict, Reason|uri]
 type Abort struct {
-	sync.Mutex
 	Details map[string]interface{}
 	Reason  URI
 }
 
-func (msg *Abort) MessageType() MessageType {
-	return MessageTypeAbort
+func (Abort) MessageType() Type {
+	return TypeAbort
 }
 
-func (msg *Abort) ToPayload() []interface{} {
+func (msg Abort) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Details, msg.Reason}
 }
 
 // [CHALLENGE, AuthMethod|string, Extra|dict]
 type Challenge struct {
-	sync.Mutex
 	AuthMethod string
 	Extra      map[string]interface{}
 }
 
-func (msg *Challenge) MessageType() MessageType {
-	return MessageTypeChallenge
+func (Challenge) MessageType() Type {
+	return TypeChallenge
 }
 
-func (msg *Challenge) ToPayload() []interface{} {
+func (msg Challenge) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.AuthMethod, msg.Extra}
 }
 
 // [AUTHENTICATE, Signature|string, Extra|dict]
 type Authenticate struct {
-	sync.Mutex
 	Signature string
 	Extra     map[string]interface{}
 }
 
-func (msg *Authenticate) MessageType() MessageType {
-	return MessageTypeAuthenticate
+func (Authenticate) MessageType() Type {
+	return TypeAuthenticate
 }
 
-func (msg *Authenticate) ToPayload() []interface{} {
+func (msg Authenticate) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Signature, msg.Extra}
 }
 
 // [GOODBYE, Details|dict, Reason|uri]
 type Goodbye struct {
-	sync.Mutex
 	Details map[string]interface{}
 	Reason  URI
 }
 
-func (msg *Goodbye) MessageType() MessageType {
-	return MessageTypeGoodbye
+func (Goodbye) MessageType() Type {
+	return TypeGoodbye
 }
 
-func (msg *Goodbye) ToPayload() []interface{} {
+func (msg Goodbye) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Details, msg.Reason}
 }
 
@@ -356,8 +287,7 @@ func (msg *Goodbye) ToPayload() []interface{} {
 // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list]
 // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list, ArgumentsKw|dict]
 type Error struct {
-	sync.Mutex
-	Type        MessageType
+	Type        Type
 	Request     ID
 	Details     map[string]interface{}
 	Error       URI
@@ -365,11 +295,11 @@ type Error struct {
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
 }
 
-func (msg *Error) MessageType() MessageType {
-	return MessageTypeError
+func (Error) MessageType() Type {
+	return TypeError
 }
 
-func (msg *Error) ToPayload() []interface{} {
+func (msg Error) ToPayload() []interface{} {
 	p := []interface{}{msg.MessageType(), msg.Type, msg.Details, msg.Details, msg.Error}
 	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
 		p = append(p, msg.Arguments, msg.ArgumentsKw)
@@ -388,14 +318,13 @@ type Publish struct {
 	Topic       URI
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
-	sync.Mutex  `json:"-"`
 }
 
-func (msg *Publish) MessageType() MessageType {
-	return MessageTypePublish
+func (Publish) MessageType() Type {
+	return TypePublish
 }
 
-func (msg *Publish) ToPayload() []interface{} {
+func (msg Publish) ToPayload() []interface{} {
 	p := []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Topic}
 	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
 		p = append(p, msg.Arguments, msg.ArgumentsKw)
@@ -409,30 +338,28 @@ func (msg *Publish) ToPayload() []interface{} {
 type Published struct {
 	Request     ID
 	Publication ID
-	sync.Mutex  `json:"-"`
 }
 
-func (msg *Published) MessageType() MessageType {
-	return MessageTypePublished
+func (Published) MessageType() Type {
+	return TypePublished
 }
 
-func (msg *Published) ToPayload() []interface{} {
+func (msg Published) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Publication}
 }
 
 // [SUBSCRIBE, Request|id, Options|dict, Topic|uri]
 type Subscribe struct {
-	Request    ID
-	Options    map[string]interface{}
-	Topic      URI
-	sync.Mutex `json:"-"`
+	Request ID
+	Options map[string]interface{}
+	Topic   URI
 }
 
-func (msg *Subscribe) MessageType() MessageType {
-	return MessageTypeSubscribe
+func (Subscribe) MessageType() Type {
+	return TypeSubscribe
 }
 
-func (msg *Subscribe) ToPayload() []interface{} {
+func (msg Subscribe) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Topic}
 }
 
@@ -440,14 +367,13 @@ func (msg *Subscribe) ToPayload() []interface{} {
 type Subscribed struct {
 	Request      ID
 	Subscription ID
-	sync.Mutex   `json:"-"`
 }
 
-func (msg *Subscribed) MessageType() MessageType {
-	return MessageTypeSubscribed
+func (Subscribed) MessageType() Type {
+	return TypeSubscribed
 }
 
-func (msg *Subscribed) ToPayload() []interface{} {
+func (msg Subscribed) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Subscription}
 }
 
@@ -455,28 +381,26 @@ func (msg *Subscribed) ToPayload() []interface{} {
 type Unsubscribe struct {
 	Request      ID
 	Subscription ID
-	sync.Mutex   `json:"-"`
 }
 
-func (msg *Unsubscribe) MessageType() MessageType {
-	return MessageTypeUnsubscribe
+func (Unsubscribe) MessageType() Type {
+	return TypeUnsubscribe
 }
 
-func (msg *Unsubscribe) ToPayload() []interface{} {
+func (msg Unsubscribe) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Subscription}
 }
 
 // [UNSUBSCRIBED, UNSUBSCRIBE.Request|id]
 type Unsubscribed struct {
-	Request    ID
-	sync.Mutex `json:"-"`
+	Request ID
 }
 
-func (msg *Unsubscribed) MessageType() MessageType {
-	return MessageTypeUnsubscribed
+func (Unsubscribed) MessageType() Type {
+	return TypeUnsubscribed
 }
 
-func (msg *Unsubscribed) ToPayload() []interface{} {
+func (msg Unsubscribed) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request}
 }
 
@@ -489,14 +413,13 @@ type Event struct {
 	Details      map[string]interface{}
 	Arguments    []interface{}          `wamp:"omitempty"`
 	ArgumentsKw  map[string]interface{} `wamp:"omitempty"`
-	sync.Mutex   `json:"-"`
 }
 
-func (msg *Event) MessageType() MessageType {
-	return MessageTypeEvent
+func (Event) MessageType() Type {
+	return TypeEvent
 }
 
-func (msg *Event) ToPayload() []interface{} {
+func (msg Event) ToPayload() []interface{} {
 	p := []interface{}{msg.MessageType(), msg.Subscription, msg.Publication, msg.Details}
 	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
 		p = append(p, msg.Arguments, msg.ArgumentsKw)
@@ -508,10 +431,9 @@ func (msg *Event) ToPayload() []interface{} {
 
 // CallResult represents the result of a CALL.
 type CallResult struct {
-	Args       []interface{}
-	Kwargs     map[string]interface{}
-	Err        URI
-	sync.Mutex `json:"-"`
+	Args   []interface{}
+	Kwargs map[string]interface{}
+	Err    URI
 }
 
 // [CALL, Request|id, Options|dict, Procedure|uri]
@@ -523,14 +445,13 @@ type Call struct {
 	Procedure   URI
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
-	sync.Mutex  `json:"-"`
 }
 
-func (msg *Call) MessageType() MessageType {
-	return MessageTypeCall
+func (Call) MessageType() Type {
+	return TypeCall
 }
 
-func (msg *Call) ToPayload() []interface{} {
+func (msg Call) ToPayload() []interface{} {
 	p := []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Procedure}
 	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
 		p = append(p, msg.Arguments, msg.ArgumentsKw)
@@ -548,14 +469,13 @@ type Result struct {
 	Details     map[string]interface{}
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
-	sync.Mutex  `json:"-"`
 }
 
-func (msg *Result) MessageType() MessageType {
-	return MessageTypeResult
+func (Result) MessageType() Type {
+	return TypeResult
 }
 
-func (msg *Result) ToPayload() []interface{} {
+func (msg Result) ToPayload() []interface{} {
 	p := []interface{}{msg.MessageType(), msg.Details}
 	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
 		p = append(p, msg.Arguments, msg.ArgumentsKw)
@@ -567,17 +487,16 @@ func (msg *Result) ToPayload() []interface{} {
 
 // [REGISTER, Request|id, Options|dict, Procedure|uri]
 type Register struct {
-	Request    ID
-	Options    map[string]interface{}
-	Procedure  URI
-	sync.Mutex `json:"-"`
+	Request   ID
+	Options   map[string]interface{}
+	Procedure URI
 }
 
-func (msg *Register) MessageType() MessageType {
-	return MessageTypeRegister
+func (Register) MessageType() Type {
+	return TypeRegister
 }
 
-func (msg *Register) ToPayload() []interface{} {
+func (msg Register) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Options, msg.Procedure}
 }
 
@@ -585,14 +504,13 @@ func (msg *Register) ToPayload() []interface{} {
 type Registered struct {
 	Request      ID
 	Registration ID
-	sync.Mutex   `json:"-"`
 }
 
-func (msg *Registered) MessageType() MessageType {
-	return MessageTypeRegistered
+func (Registered) MessageType() Type {
+	return TypeRegistered
 }
 
-func (msg *Registered) ToPayload() []interface{} {
+func (msg Registered) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Registration}
 }
 
@@ -600,28 +518,26 @@ func (msg *Registered) ToPayload() []interface{} {
 type Unregister struct {
 	Request      ID
 	Registration ID
-	sync.Mutex   `json:"-"`
 }
 
-func (msg *Unregister) MessageType() MessageType {
-	return MessageTypeUnregister
+func (Unregister) MessageType() Type {
+	return TypeUnregister
 }
 
-func (msg *Unregister) ToPayload() []interface{} {
+func (msg Unregister) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Registration}
 }
 
 // [UNREGISTERED, UNREGISTER.Request|id]
 type Unregistered struct {
-	Request    ID
-	sync.Mutex `json:"-"`
+	Request ID
 }
 
-func (msg *Unregistered) MessageType() MessageType {
-	return MessageTypeUnregistered
+func (Unregistered) MessageType() Type {
+	return TypeUnregistered
 }
 
-func (msg *Unregistered) ToPayload() []interface{} {
+func (msg Unregistered) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request}
 }
 
@@ -634,14 +550,13 @@ type Invocation struct {
 	Details      map[string]interface{}
 	Arguments    []interface{}          `wamp:"omitempty"`
 	ArgumentsKw  map[string]interface{} `wamp:"omitempty"`
-	sync.Mutex   `json:"-"`
 }
 
-func (msg *Invocation) MessageType() MessageType {
-	return MessageTypeInvocation
+func (Invocation) MessageType() Type {
+	return TypeInvocation
 }
 
-func (msg *Invocation) ToPayload() []interface{} {
+func (msg Invocation) ToPayload() []interface{} {
 	p := []interface{}{msg.MessageType(), msg.Request, msg.Registration, msg.Details}
 	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
 		p = append(p, msg.Arguments, msg.ArgumentsKw)
@@ -659,14 +574,13 @@ type Yield struct {
 	Options     map[string]interface{}
 	Arguments   []interface{}          `wamp:"omitempty"`
 	ArgumentsKw map[string]interface{} `wamp:"omitempty"`
-	sync.Mutex  `json:"-"`
 }
 
-func (msg *Yield) MessageType() MessageType {
-	return MessageTypeYield
+func (Yield) MessageType() Type {
+	return TypeYield
 }
 
-func (msg *Yield) ToPayload() []interface{} {
+func (msg Yield) ToPayload() []interface{} {
 	p := []interface{}{msg.MessageType(), msg.Request, msg.Options}
 	if nil != msg.ArgumentsKw && 0 < len(msg.ArgumentsKw) {
 		p = append(p, msg.Arguments, msg.ArgumentsKw)
@@ -678,30 +592,28 @@ func (msg *Yield) ToPayload() []interface{} {
 
 // [CANCEL, CALL.Request|id, Options|dict]
 type Cancel struct {
-	Request    ID
-	Options    map[string]interface{}
-	sync.Mutex `json:"-"`
+	Request ID
+	Options map[string]interface{}
 }
 
-func (msg *Cancel) MessageType() MessageType {
-	return MessageTypeCancel
+func (Cancel) MessageType() Type {
+	return TypeCancel
 }
 
-func (msg *Cancel) ToPayload() []interface{} {
+func (msg Cancel) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Options}
 }
 
 // [INTERRUPT, INVOCATION.Request|id, Options|dict]
 type Interrupt struct {
-	Request    ID
-	Options    map[string]interface{}
-	sync.Mutex `json:"-"`
+	Request ID
+	Options map[string]interface{}
 }
 
-func (msg *Interrupt) MessageType() MessageType {
-	return MessageTypeInterrupt
+func (Interrupt) MessageType() Type {
+	return TypeInterrupt
 }
 
-func (msg *Interrupt) ToPayload() []interface{} {
+func (msg Interrupt) ToPayload() []interface{} {
 	return []interface{}{msg.MessageType(), msg.Request, msg.Options}
 }

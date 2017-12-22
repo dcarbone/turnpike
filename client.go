@@ -56,8 +56,6 @@ type (
 		// ReceiveDone is notified when the client's connection to the router is lost.
 		ReceiveDone chan bool
 
-		ctx context.Context
-
 		subscriptions     map[ID]*subscription
 		subscriptionsLock sync.RWMutex
 
@@ -93,14 +91,14 @@ func NewWebSocketClient(serialization SerializationFormat, url string, tlscfg *t
 // NewClient takes a connected Peer and returns a new Client
 func NewClient(p Peer) (*Client, error) {
 	if nil == p {
-		return nil, errors.New("Unable to construct client: Peer cannot be nil")
+		return nil, errors.New("unable to construct client: Peer cannot be nil")
 	}
 
 	c := &Client{
 		Peer:           p,
 		ReceiveTimeout: 10 * time.Second,
 
-		ctx: context.Background(),
+		incoming: make(chan Message),
 
 		subscriptions: make(map[ID]*subscription),
 
@@ -112,21 +110,22 @@ func NewClient(p Peer) (*Client, error) {
 }
 
 // LeaveRealm leaves the current realm without closing the connection to the server.
-func (c *Client) LeaveRealm() error {
-	if err := c.Send(msgGoodbyeClient); err != nil {
+func (c *Client) LeaveRealm(ctx context.Context) error {
+
+	if err := c.Send(ctx, msgGoodbyeClient); err != nil {
 		return fmt.Errorf("error leaving realm: %v", err)
 	}
 	return nil
 }
 
 // Close closes the connection to the server.
-func (c *Client) Close() error {
+func (c *Client) Close(ctx context.Context) error {
 	if c.Peer.Closed() {
-		return errors.New("Client already closed")
+		return errors.New("client already closed")
 	}
 
 	// attempt to leave realm
-	if err := c.LeaveRealm(); err != nil {
+	if err := c.LeaveRealm(ctx); err != nil {
 		return err
 	}
 
@@ -134,9 +133,9 @@ func (c *Client) Close() error {
 }
 
 // JoinRealm joins a WAMP realm, but does not handle challenge/response authentication.
-func (c *Client) JoinRealm(realm string, details map[string]interface{}) (map[string]interface{}, error) {
+func (c *Client) JoinRealm(ctx context.Context, realm string, details map[string]interface{}) (map[string]interface{}, error) {
 	if c.Peer.Closed() {
-		return nil, errors.New("Client is closed")
+		return nil, errors.New("client is closed")
 	}
 
 	if details == nil {
@@ -146,11 +145,11 @@ func (c *Client) JoinRealm(realm string, details map[string]interface{}) (map[st
 	details["roles"] = clientRoles()
 
 	if c.Auth != nil && len(c.Auth) > 0 {
-		return c.joinRealmCRA(realm, details)
+		return c.joinRealmCRA(ctx, realm, details)
 	}
 
-	if err := c.Send(&Hello{Realm: URI(realm), Details: details}); err != nil {
-		logErr(c.Close())
+	if err := c.Send(ctx, &HelloMessage{Realm: URI(realm), Details: details}); err != nil {
+		logErr(c.Close(ctx))
 		return nil, err
 	}
 
@@ -173,14 +172,14 @@ func (c *Client) JoinRealm(realm string, details map[string]interface{}) (map[st
 }
 
 // joinRealmCRA joins a WAMP realm and handles challenge/response authentication.
-func (c *Client) joinRealmCRA(realm string, details map[string]interface{}) (map[string]interface{}, error) {
+func (c *Client) joinRealmCRA(ctx context.Context, realm string, details map[string]interface{}) (map[string]interface{}, error) {
 	authmethods := []interface{}{}
 	for m := range c.Auth {
 		authmethods = append(authmethods, m)
 	}
 	details["authmethods"] = authmethods
 
-	err := c.Send(&Hello{Realm: URI(realm), Details: details})
+	err := c.Send(&HelloMessage{Realm: URI(realm), Details: details})
 	if err != nil {
 		logErr(c.Close())
 		return nil, err
@@ -246,7 +245,13 @@ func (c *Client) Receive() {
 		return
 	}
 
+	var msg Message
+	var err error
+
 MessageLoop:
+	for {
+		msg, err = c.Peer.Receive()
+	}
 	for msg := range c.Peer.Receive() {
 
 		switch msg := msg.(type) {
@@ -297,11 +302,11 @@ MessageLoop:
 // Subscribe registers the PublishEventHandler to be called for every message in the provided topic.
 func (c *Client) Subscribe(topic string, options map[string]interface{}, fn PublishEventHandler) error {
 	if c.Peer.Closed() {
-		return errors.New("Client is closed")
+		return errors.New("client is closed")
 	}
 
 	if nil == fn {
-		return fmt.Errorf("Unable to subscribe to topic \"%s\": no PublishEventHandler defined", topic)
+		return fmt.Errorf("unable to subscribe to topic \"%s\": no PublishEventHandler defined", topic)
 	}
 
 	if options == nil {
@@ -353,7 +358,7 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Publ
 // Unsubscribe removes the registered PublishEventHandler from the topic.
 func (c *Client) Unsubscribe(topic string) error {
 	if c.Peer.Closed() {
-		return errors.New("Client is closed")
+		return errors.New("client is closed")
 	}
 
 	var subscriptionID ID
@@ -369,7 +374,7 @@ func (c *Client) Unsubscribe(topic string) error {
 	c.subscriptionsLock.RUnlock()
 
 	if 0 == subscriptionID {
-		return fmt.Errorf("Event %s is not registered with this client.", topic)
+		return fmt.Errorf("event %s is not registered with this client.", topic)
 	}
 
 	id := NewID()
@@ -420,7 +425,7 @@ func (c *Client) Unsubscribe(topic string) error {
 // Publish publishes an EVENT to all subscribed peers.
 func (c *Client) Publish(topic string, options map[string]interface{}, args []interface{}, kwargs map[string]interface{}) error {
 	if c.Peer.Closed() {
-		return errors.New("Client is closed")
+		return errors.New("client is closed")
 	}
 
 	if options == nil {
@@ -439,7 +444,7 @@ func (c *Client) Publish(topic string, options map[string]interface{}, args []in
 // Register registers a MethodHandler procedure with the router.
 func (c *Client) Register(procedure string, fn MethodHandler, options map[string]interface{}) error {
 	if c.Peer.Closed() {
-		return errors.New("Client is closed")
+		return errors.New("client is closed")
 	}
 
 	id := NewID()
@@ -482,7 +487,7 @@ func (c *Client) Register(procedure string, fn MethodHandler, options map[string
 // BasicRegister registers a BasicMethodHandler procedure with the router
 func (c *Client) BasicRegister(procedure string, fn BasicMethodHandler) error {
 	if c.Peer.Closed() {
-		return errors.New("Client is closed")
+		return errors.New("client is closed")
 	}
 
 	wrap := func(args []interface{}, kwargs map[string]interface{},
@@ -495,7 +500,7 @@ func (c *Client) BasicRegister(procedure string, fn BasicMethodHandler) error {
 // Unregister removes a procedure with the router
 func (c *Client) Unregister(procedure string) error {
 	if c.Peer.Closed() {
-		return errors.New("Client is closed")
+		return errors.New("client is closed")
 	}
 
 	c.proceduresLock.RLock()
@@ -514,7 +519,7 @@ func (c *Client) Unregister(procedure string) error {
 	c.proceduresLock.RUnlock()
 
 	if !found {
-		return fmt.Errorf("Procedure %s is not registered with this client.", procedure)
+		return fmt.Errorf("procedure %s is not registered with this client.", procedure)
 	}
 
 	// queue up procedure for deletion
@@ -552,7 +557,7 @@ func (c *Client) Unregister(procedure string) error {
 // Call calls a procedure given a URI.
 func (c *Client) Call(procedure string, options map[string]interface{}, args []interface{}, kwargs map[string]interface{}) (*Result, error) {
 	if c.Peer.Closed() {
-		return nil, errors.New("Client is closed")
+		return nil, errors.New("client is closed")
 	}
 
 	id := NewID()
