@@ -4,16 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"github.com/dcarbone/turnpike/message"
 	"github.com/gorilla/websocket"
 	"sync"
 	"time"
 )
 
-// TODO: be smarter and combine msg and b
 type packet struct {
 	ctx  context.Context
-	msg  message.Message
+	msg  Message
 	err  error
 	done chan *packet
 }
@@ -127,7 +125,7 @@ func (p *webSocketPeer) Closed() bool {
 	return b
 }
 
-// Close will attempt to politely close the connection after sending a Goodbye message
+// Close will attempt to politely close the connection after sending a MessageGoodbye message
 func (p *webSocketPeer) Close() error {
 	p.mu.Lock()
 	if p.closed {
@@ -151,18 +149,18 @@ func (p *webSocketPeer) Close() error {
 	closeMsg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "goodbye")
 	err := conn.WriteControl(websocket.CloseMessage, closeMsg, time.Now().Add(5*time.Second))
 	if err != nil {
-		log.Printf("Unable to send \"Goodbye\": %s", err)
+		log.Printf("Unable to send \"MessageGoodbye\": %s", err)
 	}
 
 	// terminate!
 	return conn.Close()
 }
 
-func (p *webSocketPeer) Receive() (message.Message, error) {
+func (p *webSocketPeer) Receive() (Message, error) {
 	return p.ReceiveUntil(context.Background())
 }
 
-func (p *webSocketPeer) ReceiveUntil(ctx context.Context) (message.Message, error) {
+func (p *webSocketPeer) ReceiveUntil(ctx context.Context) (Message, error) {
 	p.mu.Lock()
 	if p.closed {
 		p.mu.Unlock()
@@ -180,12 +178,12 @@ func (p *webSocketPeer) ReceiveUntil(ctx context.Context) (message.Message, erro
 }
 
 // Send will block until the send is attempted
-func (p *webSocketPeer) Send(ctx context.Context, msg message.Message) error {
+func (p *webSocketPeer) Send(ctx context.Context, msg Message) error {
 	return <-p.SendAsync(ctx, msg, nil)
 }
 
 // SendAsync will not block until the send is attempted.
-func (p *webSocketPeer) SendAsync(ctx context.Context, msg message.Message, errChan chan error) <-chan error {
+func (p *webSocketPeer) SendAsync(ctx context.Context, msg Message, errChan chan error) <-chan error {
 	p.mu.Lock()
 	if errChan == nil {
 		errChan = make(chan error, 1)
@@ -214,7 +212,7 @@ func (p *webSocketPeer) read() {
 
 	var msgType int
 	var b []byte
-	var msg message.Message
+	var msg Message
 	var err error
 	var closePeer bool
 
@@ -294,7 +292,7 @@ func (p *webSocketPeer) write() {
 		} else if err = conn.WriteMessage(msgType, b); err != nil {
 			pack.err = errSocketWrite{err}
 			closePeer = true
-		} else if pack.msg.MessageType() == message.TypeAbort {
+		} else if pack.msg.MessageType() == MessageTypeAbort {
 			closePeer = true
 		}
 

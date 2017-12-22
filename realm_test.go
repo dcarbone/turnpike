@@ -12,7 +12,7 @@ func TestNoAuthentication(t *testing.T) {
 		realm := Realm{}
 		Convey("When a client is authenticated", func() {
 			msg, err := realm.authenticate(map[string]interface{}{})
-			Convey("Authenticate should return a Welcome message", func() {
+			Convey("MessageAuthenticate should return a Welcome message", func() {
 				So(err, ShouldEqual, nil)
 				So(msg.MessageType(), ShouldEqual, MessageTypeWelcome)
 			})
@@ -41,7 +41,7 @@ func TestBasicAuthenticator(t *testing.T) {
 				"password": "password",
 			}
 			_, err := realm.authenticate(details)
-			Convey("Authenticate should return an error", func() {
+			Convey("MessageAuthenticate should return an error", func() {
 				So(err, ShouldNotEqual, nil)
 			})
 		})
@@ -51,7 +51,7 @@ func TestBasicAuthenticator(t *testing.T) {
 				"authmethods": []interface{}{"test"},
 			}
 			_, err := realm.authenticate(details)
-			Convey("Authenticate should return an error", func() {
+			Convey("MessageAuthenticate should return an error", func() {
 				So(err, ShouldNotEqual, nil)
 			})
 		})
@@ -61,11 +61,11 @@ func TestBasicAuthenticator(t *testing.T) {
 				"authmethods": []interface{}{"test"},
 			}
 			msg, err := realm.authenticate(details)
-			Convey("Authenticate should return a Welcome message", func() {
+			Convey("MessageAuthenticate should return a Welcome message", func() {
 				So(err, ShouldEqual, nil)
 				So(msg.MessageType(), ShouldEqual, MessageTypeWelcome)
 			})
-			Convey("Authenticate should return correct details", func() {
+			Convey("MessageAuthenticate should return correct details", func() {
 				So(msg.(*Welcome).Details["check"], ShouldEqual, "testing")
 			})
 		})
@@ -105,7 +105,7 @@ func TestCRAuthenticator(t *testing.T) {
 				"authmethods": []interface{}{"test"},
 			}
 			_, err := realm.authenticate(details)
-			Convey("Authenticate should return an error", func() {
+			Convey("MessageAuthenticate should return an error", func() {
 				So(err, ShouldNotEqual, nil)
 			})
 		})
@@ -115,7 +115,7 @@ func TestCRAuthenticator(t *testing.T) {
 				"authmethods": []interface{}{"test"},
 			}
 			msg, err := realm.authenticate(details)
-			Convey("Authenticate should return a Challenge message", func() {
+			Convey("MessageAuthenticate should return a Challenge message", func() {
 				So(err, ShouldEqual, nil)
 				So(msg.MessageType(), ShouldEqual, MessageTypeChallenge)
 			})

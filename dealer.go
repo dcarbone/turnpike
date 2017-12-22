@@ -4,11 +4,11 @@ import "sync"
 
 // A Dealer routes and manages RPC calls to callees.
 type Dealer interface {
-	// Register a procedure on an endpoint
+	// MessageRegister a procedure on an endpoint
 	Register(*Session, *Register)
-	// Unregister a procedure on an endpoint
+	// MessageUnregister a procedure on an endpoint
 	Unregister(*Session, *Unregister)
-	// Call a procedure on an endpoint
+	// MessageCall a procedure on an endpoint
 	Call(*Session, *Call)
 	// Return the result of a procedure call
 	Yield(*Session, *Yield)
@@ -128,12 +128,12 @@ func (d *defaultDealer) Call(caller *Session, msg *Call) {
 			invocationID := NewID()
 			d.invocations[invocationID] = msg.Request
 			d.lock.Unlock()
-			details := map[string]interface{}{};
+			details := map[string]interface{}{}
 
 			// Options{"disclose_me": true} -> Details{"caller": 3335656}
 			if val, ok := msg.Options["disclose_me"]; ok {
 				if disclose, ok := val.(bool); ok && (disclose == true) {
-					details["caller"] = caller.Id
+					details["caller"] = caller.ID
 				}
 			}
 

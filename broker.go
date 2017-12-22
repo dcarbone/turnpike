@@ -71,7 +71,7 @@ func (br *defaultBroker) Publish(pub *Session, msg *Publish) {
 	}
 }
 
-// Subscribe subscribes the client to the given topic.
+// MessageSubscribe subscribes the client to the given topic.
 func (br *defaultBroker) Subscribe(sub *Session, msg *Subscribe) {
 	id := NewID()
 

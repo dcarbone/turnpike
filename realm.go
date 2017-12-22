@@ -65,7 +65,7 @@ func (r *Realm) init() {
 	}
 
 	peerA, peerB := localPipe()
-	sess := Session{Peer: peerA, Id: NewID()}
+	sess := Session{Peer: peerA, ID: NewID()}
 	r.localClient.Client, err = NewClient(peerB)
 	if nil != err {
 		panic(fmt.Sprintf("Unable to initialize Realm: %s", err))
@@ -126,7 +126,7 @@ func (r *Realm) Close() {
 				// wait around for something to happen...
 				select {
 				case <-ctx.Done():
-					logErr(fmt.Errorf("unable to close session \"%d\": %s", s.Id, ctx.Err()))
+					logErr(fmt.Errorf("unable to close session \"%d\": %s", s.ID, ctx.Err()))
 				case err := <-closeChan:
 					logErr(err)
 				}
@@ -154,7 +154,7 @@ func (l *localClient) onLeave(session ID) {
 func (r *Realm) handleSession(sess *Session) {
 	r.closedLock.Lock()
 	if r.closed {
-		log.Printf("Will not handle session \"%d\" as realm \"%s\" is already closed", sess.Id, string(r.URI))
+		log.Printf("Will not handle session \"%d\" as realm \"%s\" is already closed", sess.ID, string(r.URI))
 		r.closedLock.Lock()
 		return
 	}
@@ -162,7 +162,7 @@ func (r *Realm) handleSession(sess *Session) {
 	r.closedLock.Unlock()
 
 	r.sessionsLock.Lock()
-	r.sessions[sess.Id] = sess
+	r.sessions[sess.ID] = sess
 	r.sessionsLock.Unlock()
 
 	r.onJoin(sess.Details)
@@ -203,7 +203,7 @@ func (r *Realm) handleSession(sess *Session) {
 			case *Yield:
 				r.Dealer.Yield(sess, msg)
 
-				// Error messages
+				// MessageError messages
 			case *Error:
 				if msg.Type == MessageTypeInvocation {
 					// the only type of ERROR message the router should receive
@@ -251,12 +251,12 @@ func (r *Realm) handleSession(sess *Session) {
 	}
 
 	r.sessionsLock.Lock()
-	delete(r.sessions, sess.Id)
+	delete(r.sessions, sess.ID)
 	r.sessionsLock.Unlock()
 
 	r.Dealer.RemoveSession(sess)
 	r.Broker.RemoveSession(sess)
-	r.onLeave(sess.Id)
+	r.onLeave(sess.ID)
 }
 
 func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcome, error) {
@@ -268,7 +268,7 @@ func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcom
 	if msg.MessageType() == MessageTypeWelcome {
 		return msg.(*Welcome), nil
 	}
-	// Challenge response
+	// MessageChallenge response
 	challenge := msg.(*Challenge)
 	if err := client.Send(challenge); err != nil {
 		return nil, err
@@ -286,7 +286,7 @@ func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcom
 	}
 }
 
-// Authenticate either authenticates a client or returns a challenge message if
+// MessageAuthenticate either authenticates a client or returns a challenge message if
 // challenge/response authentication is to be used.
 func (r *Realm) authenticate(details map[string]interface{}) (Message, error) {
 	log.Println("[realm] authenticate() details:", details)
@@ -348,7 +348,7 @@ func (r *Realm) getPeer(details map[string]interface{}) (Peer, error) {
 		details = make(map[string]interface{})
 	}
 
-	sess := Session{Peer: peerA, Id: NewID(), Details: details}
+	sess := Session{Peer: peerA, ID: NewID(), Details: details}
 
 	go r.handleSession(&sess)
 

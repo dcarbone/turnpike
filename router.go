@@ -238,7 +238,7 @@ func (r *defaultRouter) Accept(peer Peer) error {
 	welcome.Details["realm"] = hello.Realm
 	sess := &Session{
 		Peer:    peer,
-		Id:      welcome.ID,
+		ID:      welcome.ID,
 		Details: welcome.Details,
 	}
 	r.sessionOpenCallbacksLock.RLock()

@@ -1,18 +1,19 @@
 package turnpike
 
 import (
+	"context"
 	"fmt"
 )
 
 // Session represents an active WAMP session
 type Session struct {
 	Peer
-	Id      ID
+	ID      ID
 	Details map[string]interface{}
 }
 
 func (s Session) String() string {
-	return fmt.Sprintf("%d", s.Id)
+	return fmt.Sprintf("%d", s.ID)
 }
 
 // localPipe creates two linked sessions. Messages sent to one will
@@ -43,13 +44,36 @@ func (s *localPeer) Closed() bool {
 	return false
 }
 
-func (s *localPeer) Receive() <-chan Message {
-	return s.incoming
+func (s *localPeer) Receive() (Message, error) {
+	return s.ReceiveUntil(context.Background())
 }
 
-func (s *localPeer) Send(msg Message) error {
-	s.outgoing <- msg
-	return nil
+func (s *localPeer) ReceiveUntil(ctx context.Context) (Message, error) {
+	select {
+	case <-ctx.Done():
+		return nil, errMessageContextFinished{ctx.Err()}
+	case msg := <-s.incoming:
+		return msg, nil
+	}
+}
+
+func (s *localPeer) Send(ctx context.Context, msg Message) error {
+	return <-s.SendAsync(ctx, msg, nil)
+}
+
+func (s *localPeer) SendAsync(ctx context.Context, msg Message, errChan chan error) <-chan error {
+	if errChan == nil {
+		errChan = make(chan error, 1)
+	}
+	go func() {
+		select {
+		case <-ctx.Done():
+			errChan <- errMessageContextFinished{ctx.Err()}
+		case s.outgoing <- msg:
+			errChan <- nil
+		}
+	}()
+	return errChan
 }
 
 func (s *localPeer) Close() error {

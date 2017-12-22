@@ -12,19 +12,19 @@ import (
 // TODO: completely re-do event system in here....
 
 var (
-	msgAbortUnexpectedMessageType = &Abort{
+	msgAbortUnexpectedMessageType = &MessageAbort{
 		Details: map[string]interface{}{},
 		Reason:  "turnpike.error.unexpected_message_type",
 	}
-	msgAbortNoAuthHandler = &Abort{
+	msgAbortNoAuthHandler = &MessageAbort{
 		Details: map[string]interface{}{},
 		Reason:  "turnpike.error.no_handler_for_authmethod",
 	}
-	msgAbortAuthFailure = &Abort{
+	msgAbortAuthFailure = &MessageAbort{
 		Details: map[string]interface{}{},
 		Reason:  "turnpike.error.authentication_failure",
 	}
-	msgGoodbyeClient = &Goodbye{
+	msgGoodbyeClient = &MessageGoodbye{
 		Details: map[string]interface{}{},
 		Reason:  ErrCloseRealm,
 	}
@@ -36,7 +36,7 @@ type (
 	AuthFunc func(helloDetails, challengeDetails map[string]interface{}) (string, map[string]interface{}, error)
 
 	// PublishEventHandler handles a publish event.
-	PublishEventHandler func(*Event)
+	PublishEventHandler func(*MessageEvent)
 
 	// MethodHandler is an RPC endpoint.
 	MethodHandler func(args []interface{}, kwargs map[string]interface{}, details map[string]interface{}) (result *CallResult)
@@ -284,7 +284,7 @@ MessageLoop:
 			c.notifyListener(msg, msg.Request)
 
 		case *Goodbye:
-			log.Println("client received Goodbye message")
+			log.Println("client received MessageGoodbye message")
 			break MessageLoop
 
 		default:
@@ -299,7 +299,7 @@ MessageLoop:
 	}
 }
 
-// Subscribe registers the PublishEventHandler to be called for every message in the provided topic.
+// MessageSubscribe registers the PublishEventHandler to be called for every message in the provided topic.
 func (c *Client) Subscribe(topic string, options map[string]interface{}, fn PublishEventHandler) error {
 	if c.Peer.Closed() {
 		return errors.New("client is closed")
@@ -355,7 +355,7 @@ func (c *Client) Subscribe(topic string, options map[string]interface{}, fn Publ
 	return nil
 }
 
-// Unsubscribe removes the registered PublishEventHandler from the topic.
+// MessageUnsubscribe removes the registered PublishEventHandler from the topic.
 func (c *Client) Unsubscribe(topic string) error {
 	if c.Peer.Closed() {
 		return errors.New("client is closed")
@@ -441,7 +441,7 @@ func (c *Client) Publish(topic string, options map[string]interface{}, args []in
 	})
 }
 
-// Register registers a MethodHandler procedure with the router.
+// MessageRegister registers a MethodHandler procedure with the router.
 func (c *Client) Register(procedure string, fn MethodHandler, options map[string]interface{}) error {
 	if c.Peer.Closed() {
 		return errors.New("client is closed")
@@ -497,7 +497,7 @@ func (c *Client) BasicRegister(procedure string, fn BasicMethodHandler) error {
 	return c.Register(procedure, wrap, make(map[string]interface{}))
 }
 
-// Unregister removes a procedure with the router
+// MessageUnregister removes a procedure with the router
 func (c *Client) Unregister(procedure string) error {
 	if c.Peer.Closed() {
 		return errors.New("client is closed")
@@ -554,7 +554,7 @@ func (c *Client) Unregister(procedure string) error {
 	return nil
 }
 
-// Call calls a procedure given a URI.
+// MessageCall calls a procedure given a URI.
 func (c *Client) Call(procedure string, options map[string]interface{}, args []interface{}, kwargs map[string]interface{}) (*Result, error) {
 	if c.Peer.Closed() {
 		return nil, errors.New("client is closed")
