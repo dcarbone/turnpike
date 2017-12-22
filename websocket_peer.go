@@ -210,6 +210,9 @@ func (p *webSocketPeer) SendAsync(ctx context.Context, msg message.Message, errC
 }
 
 func (p *webSocketPeer) read() {
+	var conn *websocket.Conn
+	var serializer Serializer
+
 	var msgType int
 	var b []byte
 	var msg message.Message
@@ -219,40 +222,37 @@ func (p *webSocketPeer) read() {
 	for pack := range p.in {
 		p.mu.Lock()
 
-		// pre-read error checks
+		// lock while checking for closed...
 		if p.closed {
 			p.mu.Unlock()
 			pack.err = errors.New("peer is closed")
-			pack.finish()
-			continue
-		} else if err = pack.ctx.Err(); err != nil {
-			p.mu.Unlock()
-			pack.err = err
-			pack.finish()
-			continue
+			goto finish
 		}
+
+		// localize stuff...
+		conn = p.conn
+		serializer = p.serializer
 
 		p.mu.Unlock()
 
-		if msgType, b, err = p.conn.ReadMessage(); err != nil {
-			pack.err = err
+		if err = pack.ctx.Err(); err != nil {
+			pack.err = &errMessageContextFinished{err}
+		} else if msgType, b, err = conn.ReadMessage(); err != nil {
+			pack.err = &errSocketRead{err}
 			closePeer = true
 		} else if msgType == websocket.CloseMessage {
-			pack.err = errors.New("peer is closing")
+			log.Printf("Close message: %s", string(b))
 			closePeer = true
-		} else if msg, err = p.serializer.Deserialize(b); err != nil {
-			pack.err = err
+		} else if msg, err = serializer.Deserialize(b); err != nil {
+			pack.err = &errMessageDeserialize{err}
 		} else {
 			pack.msg = msg
 		}
 
+	finish:
 		if closePeer {
-			err = p.Close()
-			if err != nil {
-				// TODO: multi-error?
-				if pack.err == nil {
-					pack.err = err
-				}
+			if err = p.Close(); err != nil {
+				log.Printf("read() Error closing socket: %s", err)
 			}
 		}
 
@@ -268,6 +268,7 @@ func (p *webSocketPeer) write() {
 	var b []byte
 	var err error
 	var closePeer bool
+
 	for pack := range p.out {
 		p.mu.Lock()
 
@@ -300,9 +301,8 @@ func (p *webSocketPeer) write() {
 
 	finish:
 		if closePeer {
-			err = p.Close()
-			if err != nil {
-				log.Printf("Error closing socket: %s", err)
+			if err = p.Close(); err != nil {
+				log.Printf("write() Error closing socket: %s", err)
 			}
 		}
 
