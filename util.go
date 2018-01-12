@@ -94,11 +94,11 @@ func clientRoles() map[string]map[string]interface{} {
 func formatUnexpectedMessage(msg Message, expected MessageType) string {
 	s := fmt.Sprintf("received unexpected %s message while waiting for %s", msg.MessageType(), expected)
 	switch m := msg.(type) {
-	case *Abort:
+	case *MessageAbort:
 		s += ": " + string(m.Reason)
 		s += formatUnknownMap(m.Details)
 		return s
-	case *Goodbye:
+	case *MessageGoodbye:
 		s += ": " + string(m.Reason)
 		s += formatUnknownMap(m.Details)
 		return s

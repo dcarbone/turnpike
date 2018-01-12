@@ -182,19 +182,25 @@ func (r *defaultRouter) RegisterRealm(realm *Realm) error {
 
 func (r *defaultRouter) Accept(peer Peer) error {
 	if r.closed {
-		logErr(peer.Send(&Abort{Reason: ErrSystemShutdown}))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		logErr(peer.Send(ctx, &MessageAbort{Reason: ErrSystemShutdown}))
+		cancel()
 		return fmt.Errorf("Router is closing, no new connections are allowed")
 	}
 
-	msg, err := GetMessageTimeout(peer, 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	msg, err := peer.ReceiveUntil(ctx)
+	cancel()
 	if err != nil {
 		return err
 	}
 	log.Printf("%s: %+v", msg.MessageType(), msg)
 
-	hello, ok := msg.(*HelloMessage)
+	hello, ok := msg.(*MessageHello)
 	if !ok {
-		logErr(peer.Send(&Abort{Reason: URI("wamp.error.protocol_violation")}))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		logErr(peer.Send(ctx, &MessageAbort{Reason: URI("wamp.error.protocol_violation")}))
+		cancel()
 		return fmt.Errorf("protocol violation: expected HELLO, received %s", msg.MessageType())
 	}
 
@@ -203,13 +209,15 @@ func (r *defaultRouter) Accept(peer Peer) error {
 
 	realm, ok := r.realms[hello.Realm]
 	if !ok {
-		logErr(peer.Send(&Abort{Reason: ErrNoSuchRealm}))
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		logErr(peer.Send(ctx, &MessageAbort{Reason: ErrNoSuchRealm}))
+		cancel()
 		return NoSuchRealmError(hello.Realm)
 	}
 
 	welcome, err := realm.handleAuth(peer, hello.Details)
 	if err != nil {
-		abort := &Abort{
+		abort := &MessageAbort{
 			Reason:  ErrAuthorizationFailed, // TODO: should this be AuthenticationFailed?
 			Details: map[string]interface{}{"error": err.Error()},
 		}

@@ -1,19 +1,22 @@
 package turnpike
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // A Dealer routes and manages RPC calls to callees.
 type Dealer interface {
 	// MessageRegister a procedure on an endpoint
-	Register(*Session, *Register)
+	Register(context.Context, *Session, *MessageRegister)
 	// MessageUnregister a procedure on an endpoint
-	Unregister(*Session, *Unregister)
+	Unregister(context.Context, *Session, *MessageUnregister)
 	// MessageCall a procedure on an endpoint
-	Call(*Session, *Call)
+	Call(context.Context, *Session, *MessageCall)
 	// Return the result of a procedure call
-	Yield(*Session, *Yield)
+	Yield(context.Context, *Session, *MessageYield)
 	// Handle an ERROR message from an invocation
-	Error(*Session, *Error)
+	Error(context.Context, *Session, *MessageError)
 	// Remove a callee's registrations
 	RemoveSession(*Session)
 }
@@ -51,13 +54,13 @@ func NewDefaultDealer() Dealer {
 	}
 }
 
-func (d *defaultDealer) Register(callee *Session, msg *Register) {
+func (d *defaultDealer) Register(ctx context.Context, callee *Session, msg *MessageRegister) {
 	reg := NewID()
 	d.lock.Lock()
 	if id, ok := d.registrations[msg.Procedure]; ok {
 		d.lock.Unlock()
 		log.Println("error: procedure already exists:", msg.Procedure, id)
-		callee.Send(&Error{
+		callee.Send(ctx, &MessageError{
 			Type:    msg.MessageType(),
 			Request: msg.Request,
 			Details: make(map[string]interface{}),
@@ -71,19 +74,19 @@ func (d *defaultDealer) Register(callee *Session, msg *Register) {
 	d.lock.Unlock()
 
 	log.Printf("registered procedure %v [%v]", reg, msg.Procedure)
-	callee.Send(&Registered{
+	callee.Send(ctx, &MessageRegistered{
 		Request:      msg.Request,
 		Registration: reg,
 	})
 }
 
-func (d *defaultDealer) Unregister(callee *Session, msg *Unregister) {
+func (d *defaultDealer) Unregister(ctx context.Context, callee *Session, msg *MessageUnregister) {
 	d.lock.Lock()
 	if procedure, ok := d.procedures[msg.Registration]; !ok {
 		d.lock.Unlock()
 		// the registration doesn't exist
 		log.Println("error: no such registration:", msg.Registration)
-		callee.Send(&Error{
+		callee.Send(ctx, &MessageError{
 			Type:    msg.MessageType(),
 			Request: msg.Request,
 			Details: make(map[string]interface{}),
@@ -95,17 +98,17 @@ func (d *defaultDealer) Unregister(callee *Session, msg *Unregister) {
 		d.removeCalleeRegistration(callee, msg.Registration)
 		d.lock.Unlock()
 		log.Printf("unregistered procedure %v [%v]", procedure.Procedure, msg.Registration)
-		callee.Send(&Unregistered{
+		callee.Send(ctx, &MessageUnregistered{
 			Request: msg.Request,
 		})
 	}
 }
 
-func (d *defaultDealer) Call(caller *Session, msg *Call) {
+func (d *defaultDealer) Call(ctx context.Context, caller *Session, msg *MessageCall) {
 	d.lock.Lock()
 	if reg, ok := d.registrations[msg.Procedure]; !ok {
 		d.lock.Unlock()
-		caller.Send(&Error{
+		caller.Send(ctx, &MessageError{
 			Type:    msg.MessageType(),
 			Request: msg.Request,
 			Details: make(map[string]interface{}),
@@ -115,7 +118,7 @@ func (d *defaultDealer) Call(caller *Session, msg *Call) {
 		if rproc, ok := d.procedures[reg]; !ok {
 			// found a registration id, but doesn't match any remote procedure
 			d.lock.Unlock()
-			caller.Send(&Error{
+			caller.Send(ctx, &MessageError{
 				Type:    msg.MessageType(),
 				Request: msg.Request,
 				Details: make(map[string]interface{}),
@@ -138,7 +141,7 @@ func (d *defaultDealer) Call(caller *Session, msg *Call) {
 			}
 
 			// TODO deal with Details{"trustlevel": 2}
-			rproc.Endpoint.Send(&Invocation{
+			rproc.Endpoint.Send(ctx, &MessageInvocation{
 				Request:      invocationID,
 				Registration: reg,
 				Details:      details,
@@ -152,7 +155,7 @@ func (d *defaultDealer) Call(caller *Session, msg *Call) {
 	}
 }
 
-func (d *defaultDealer) Yield(callee *Session, msg *Yield) {
+func (d *defaultDealer) Yield(ctx context.Context, callee *Session, msg *MessageYield) {
 	d.lock.Lock()
 	if callID, ok := d.invocations[msg.Request]; !ok {
 		d.lock.Unlock()
@@ -169,7 +172,7 @@ func (d *defaultDealer) Yield(callee *Session, msg *Yield) {
 			delete(d.calls, callID)
 			d.lock.Unlock()
 			// return the result to the caller
-			caller.Send(&Result{
+			caller.Send(ctx, &MessageResult{
 				Request:     callID,
 				Details:     map[string]interface{}{},
 				Arguments:   msg.Arguments,
@@ -180,7 +183,7 @@ func (d *defaultDealer) Yield(callee *Session, msg *Yield) {
 	}
 }
 
-func (d *defaultDealer) Error(peer *Session, msg *Error) {
+func (d *defaultDealer) Error(ctx context.Context, peer *Session, msg *MessageError) {
 	d.lock.Lock()
 	if callID, ok := d.invocations[msg.Request]; !ok {
 		d.lock.Unlock()
@@ -194,7 +197,7 @@ func (d *defaultDealer) Error(peer *Session, msg *Error) {
 			delete(d.calls, callID)
 			d.lock.Unlock()
 			// return an error to the caller
-			caller.Send(&Error{
+			caller.Send(ctx, &MessageError{
 				Type:        MessageTypeCall,
 				Request:     callID,
 				Error:       msg.Error,

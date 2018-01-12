@@ -1,16 +1,19 @@
 package turnpike
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 // Broker is the interface implemented by an object that handles routing EVENTS
 // from Publishers to Subscribers.
 type Broker interface {
 	// Publishes a message to all Subscribers.
-	Publish(*Session, *Publish)
+	Publish(context.Context, *Session, *MessagePublish)
 	// Subscribes to messages on a URI.
-	Subscribe(*Session, *Subscribe)
+	Subscribe(context.Context, *Session, *MessageSubscribe)
 	// Unsubscribes from messages on a URI.
-	Unsubscribe(*Session, *Unsubscribe)
+	Unsubscribe(context.Context, *Session, *MessageUnsubscribe)
 	// Removes all subscriptions of the subscriber.
 	RemoveSession(*Session)
 }
@@ -37,9 +40,9 @@ func NewDefaultBroker() Broker {
 //
 // If msg.Options["acknowledge"] == true, the publisher receives a Published event
 // after the message has been sent to all subscribers.
-func (br *defaultBroker) Publish(pub *Session, msg *Publish) {
+func (br *defaultBroker) Publish(ctx context.Context, pub *Session, msg *MessagePublish) {
 	pubID := NewID()
-	evtTemplate := Event{
+	evtTemplate := MessageEvent{
 		Publication: pubID,
 		Arguments:   msg.Arguments,
 		ArgumentsKw: msg.ArgumentsKw,
@@ -61,18 +64,18 @@ func (br *defaultBroker) Publish(pub *Session, msg *Publish) {
 		// shallow-copy the template
 		event := evtTemplate
 		event.Subscription = id
-		sub.Send(&event)
+		sub.Send(ctx, &event)
 	}
 	br.lock.RUnlock()
 
 	// only send published message if acknowledge is present and set to true
 	if doPub, _ := msg.Options["acknowledge"].(bool); doPub {
-		pub.Send(&Published{Request: msg.Request, Publication: pubID})
+		pub.Send(ctx, &MessagePublished{Request: msg.Request, Publication: pubID})
 	}
 }
 
 // MessageSubscribe subscribes the client to the given topic.
-func (br *defaultBroker) Subscribe(sub *Session, msg *Subscribe) {
+func (br *defaultBroker) Subscribe(ctx context.Context, sub *Session, msg *MessageSubscribe) {
 	id := NewID()
 
 	br.lock.Lock()
@@ -93,20 +96,20 @@ func (br *defaultBroker) Subscribe(sub *Session, msg *Subscribe) {
 	br.subscriptions[id] = msg.Topic
 	br.lock.Unlock()
 
-	sub.Send(&Subscribed{Request: msg.Request, Subscription: id})
+	sub.Send(ctx, &MessageSubscribed{Request: msg.Request, Subscription: id})
 }
 
-func (br *defaultBroker) Unsubscribe(sub *Session, msg *Unsubscribe) {
+func (br *defaultBroker) Unsubscribe(ctx context.Context, sub *Session, msg *MessageUnsubscribe) {
 	br.lock.Lock()
 	topic, ok := br.subscriptions[msg.Subscription]
 	if !ok {
 		br.lock.Unlock()
-		err := &Error{
+		err := &MessageError{
 			Type:    msg.MessageType(),
 			Request: msg.Request,
 			Error:   ErrNoSuchSubscription,
 		}
-		sub.Send(err)
+		sub.Send(ctx, err)
 		log.Printf("Error unsubscribing: no such subscription %v", msg.Subscription)
 		return
 	}
@@ -137,12 +140,11 @@ func (br *defaultBroker) Unsubscribe(sub *Session, msg *Unsubscribe) {
 	}
 	br.lock.Unlock()
 
-	sub.Send(&Unsubscribed{Request: msg.Request})
+	sub.Send(ctx, &MessageUnsubscribed{Request: msg.Request})
 }
 
 func (br *defaultBroker) RemoveSession(sub *Session) {
 	br.lock.Lock()
-	defer br.lock.Unlock()
 
 	for id, _ := range br.sessions[sub] {
 		topic, ok := br.subscriptions[id]
@@ -162,4 +164,6 @@ func (br *defaultBroker) RemoveSession(sub *Session) {
 		}
 	}
 	delete(br.sessions, sub)
+
+	br.lock.Unlock()
 }

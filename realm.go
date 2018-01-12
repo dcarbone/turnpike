@@ -167,47 +167,69 @@ func (r *Realm) handleSession(sess *Session) {
 
 	r.onJoin(sess.Details)
 
-	for msg := range sess.Receive() {
+	var msg Message
+	var err error
+	var terr Error
+	var ok bool
+	var ctx context.Context
+	var cancel context.CancelFunc
+	var isAuthz bool
+	var authErr error
+
+sessionLoop:
+	for {
+		msg, err = sess.Receive()
 		log.Printf("[session-%s] %s: %+v", sess, msg.MessageType(), msg)
 
+		if err != nil {
+			if terr, ok = err.(Error); ok && terr.Terminal() {
+				log.Printf("Saw terminal error: %s", err)
+				break sessionLoop
+			}
+		}
+
 		// attempt authorization...
-		isAuthz, authErr := r.Authorizer.Authorize(sess, msg)
+		isAuthz, authErr = r.Authorizer.Authorize(sess, msg)
 		if isAuthz {
 			// if authorized
 
 			// call interceptor
 			r.Interceptor.Intercept(sess, &msg)
 
+			// TODO: do this better.
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+
 			// handle message
 			switch msg := msg.(type) {
-			case *Goodbye:
-				logErr(sess.Send(&Goodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
+			case *MessageGoodbye:
 				log.Printf("[%s] leaving: %v", sess, msg.Reason)
+				logErr(sess.Send(ctx, &MessageGoodbye{Reason: ErrGoodbyeAndOut, Details: make(map[string]interface{})}))
+				cancel()
 				return
 
 				// Broker messages
-			case *Publish:
-				r.Broker.Publish(sess, msg)
-			case *Subscribe:
-				r.Broker.Subscribe(sess, msg)
-			case *Unsubscribe:
-				r.Broker.Unsubscribe(sess, msg)
+			case *MessagePublish:
+				r.Broker.Publish(ctx, sess, msg)
+			case *MessageSubscribe:
+				r.Broker.Subscribe(ctx, sess, msg)
+			case *MessageUnsubscribe:
+				r.Broker.Unsubscribe(ctx, sess, msg)
 
 				// Dealer messages
-			case *Register:
-				r.Dealer.Register(sess, msg)
-			case *Unregister:
-				r.Dealer.Unregister(sess, msg)
-			case *Call:
-				r.Dealer.Call(sess, msg)
-			case *Yield:
-				r.Dealer.Yield(sess, msg)
+			case *MessageRegister:
+				r.Dealer.Register(ctx, sess, msg)
+			case *MessageUnregister:
+				r.Dealer.Unregister(ctx, sess, msg)
+			case *MessageCall:
+				r.Dealer.Call(ctx, sess, msg)
+			case *MessageYield:
+				r.Dealer.Yield(ctx, sess, msg)
 
 				// MessageError messages
-			case *Error:
+			case *MessageError:
 				if msg.Type == MessageTypeInvocation {
 					// the only type of ERROR message the router should receive
-					r.Dealer.Error(sess, msg)
+					r.Dealer.Error(ctx, sess, msg)
 				} else {
 					log.Printf("invalid ERROR message received: %v", msg)
 				}
@@ -215,25 +237,27 @@ func (r *Realm) handleSession(sess *Session) {
 			default:
 				log.Println("Unhandled message:", msg.MessageType())
 			}
+
+			cancel()
 		} else {
 			// if unauthorized...
 
 			// create error message...
-			errMsg := &Error{Type: msg.MessageType()}
+			errMsg := &MessageError{Type: msg.MessageType()}
 			switch msg := msg.(type) {
-			case *Publish:
+			case *MessagePublish:
 				errMsg.Request = msg.Request
-			case *Subscribe:
+			case *MessageSubscribe:
 				errMsg.Request = msg.Request
-			case *Unsubscribe:
+			case *MessageUnsubscribe:
 				errMsg.Request = msg.Request
-			case *Register:
+			case *MessageRegister:
 				errMsg.Request = msg.Request
-			case *Unregister:
+			case *MessageUnregister:
 				errMsg.Request = msg.Request
-			case *Call:
+			case *MessageCall:
 				errMsg.Request = msg.Request
-			case *Yield:
+			case *MessageYield:
 				errMsg.Request = msg.Request
 			}
 
@@ -246,7 +270,9 @@ func (r *Realm) handleSession(sess *Session) {
 			}
 
 			// send error
-			logErr(sess.Send(errMsg))
+			ctx, cancel = context.WithTimeout(context.Background(), 5*time.Second)
+			logErr(sess.Send(ctx, errMsg))
+			cancel()
 		}
 	}
 
@@ -259,27 +285,32 @@ func (r *Realm) handleSession(sess *Session) {
 	r.onLeave(sess.ID)
 }
 
-func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcome, error) {
+func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*MessageWelcome, error) {
 	msg, err := r.authenticate(details)
 	if err != nil {
 		return nil, err
 	}
 	// we should never get anything besides WELCOME and CHALLENGE
 	if msg.MessageType() == MessageTypeWelcome {
-		return msg.(*Welcome), nil
+		return msg.(*MessageWelcome), nil
 	}
 	// MessageChallenge response
-	challenge := msg.(*Challenge)
-	if err := client.Send(challenge); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), r.AuthTimeout)
+	challenge := msg.(*MessageChallenge)
+	err = client.Send(ctx, challenge)
+	cancel()
+	if err != nil {
 		return nil, err
 	}
 
-	msg, err = GetMessageTimeout(client, r.AuthTimeout)
+	ctx, cancel = context.WithTimeout(context.Background(), r.AuthTimeout)
+	msg, err = client.ReceiveUntil(ctx)
+	cancel()
 	if err != nil {
 		return nil, err
 	}
 	log.Printf("%s: %+v", msg.MessageType(), msg)
-	if authenticate, ok := msg.(*Authenticate); !ok {
+	if authenticate, ok := msg.(*MessageAuthenticate); !ok {
 		return nil, fmt.Errorf("unexpected %s message received", msg.MessageType())
 	} else {
 		return r.checkResponse(challenge, authenticate)
@@ -291,7 +322,7 @@ func (r *Realm) handleAuth(client Peer, details map[string]interface{}) (*Welcom
 func (r *Realm) authenticate(details map[string]interface{}) (Message, error) {
 	log.Println("[realm] authenticate() details:", details)
 	if len(r.Authenticators) == 0 && len(r.CRAuthenticators) == 0 {
-		return &Welcome{}, nil
+		return &MessageWelcome{}, nil
 	}
 	// TODO: this might not always be a []interface{}. Using the JSON unmarshaller it will be,
 	// but we may have serializations that preserve more of the original type.
@@ -313,14 +344,14 @@ func (r *Realm) authenticate(details map[string]interface{}) (Message, error) {
 			if challenge, err := auth.Challenge(details); err != nil {
 				return nil, err
 			} else {
-				return &Challenge{AuthMethod: method, Extra: challenge}, nil
+				return &MessageChallenge{AuthMethod: method, Extra: challenge}, nil
 			}
 		}
 		if auth, ok := r.Authenticators[method]; ok {
 			if authDetails, err := auth.Authenticate(details); err != nil {
 				return nil, err
 			} else {
-				return &Welcome{Details: addAuthMethod(authDetails, method)}, nil
+				return &MessageWelcome{Details: addAuthMethod(authDetails, method)}, nil
 			}
 		}
 	}
@@ -329,7 +360,7 @@ func (r *Realm) authenticate(details map[string]interface{}) (Message, error) {
 }
 
 // checkResponse determines whether the response to the challenge is sufficient to gain access to the Realm.
-func (r *Realm) checkResponse(chal *Challenge, auth *Authenticate) (*Welcome, error) {
+func (r *Realm) checkResponse(chal *MessageChallenge, auth *MessageAuthenticate) (*MessageWelcome, error) {
 	authenticator, ok := r.CRAuthenticators[chal.AuthMethod]
 	if !ok {
 		return nil, fmt.Errorf("authentication method has been removed")
@@ -337,7 +368,7 @@ func (r *Realm) checkResponse(chal *Challenge, auth *Authenticate) (*Welcome, er
 	if details, err := authenticator.Authenticate(chal.Extra, auth.Signature); err != nil {
 		return nil, err
 	} else {
-		return &Welcome{Details: addAuthMethod(details, chal.AuthMethod)}, nil
+		return &MessageWelcome{Details: addAuthMethod(details, chal.AuthMethod)}, nil
 	}
 }
 
